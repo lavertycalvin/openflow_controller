@@ -80,7 +80,7 @@ void setup_new_switch(int fd){
 	struct of_switch *new_switch = &idk_man.switch_list[idk_man.num_connected_switches];
 	
 	/* add switch to the pool */
-	new_switch->is_alive		= 1;
+	new_switch->switch_status 	= ALIVE;
 	new_switch->socket_fd 		= fd;
 	new_switch->bytes_read 		= 0;
 	new_switch->bytes_written 	= 0;
@@ -167,7 +167,7 @@ void handle_all_sockets(){
 	
 	int i = 0;
 	for(; i < idk_man.num_connected_switches; i++){
-		if(idk_man.switch_list[i].is_alive){
+		if(idk_man.switch_list[i].switch_status == ALIVE){
 			if(FD_ISSET(idk_man.switch_list[i].socket_fd, &read_sockets)){
 				//can read from this client
 			}
