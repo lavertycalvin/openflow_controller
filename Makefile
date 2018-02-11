@@ -25,8 +25,8 @@ endif
 
 all:  controller-$(EXEC_SUFFIX)
 
-controller-$(EXEC_SUFFIX): controller.c
-	$(CC) $(CFLAGS) $(OSINC) $(OSLIB) $(OSDEF) -o $@ controller.c checksum.c smartalloc.c -lpcap
+controller-$(EXEC_SUFFIX): controller.c rw_packets.c
+	$(CC) $(CFLAGS) $(OSINC) $(OSLIB) $(OSDEF) -o $@ controller.c checksum.c rw_packets.c smartalloc.c -lpcap
 
 handin: README
 	handin bellardo p1 README smartalloc.c smartalloc.h checksum.c checksum.h ping_spoof.c Makefile
