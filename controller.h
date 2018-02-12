@@ -19,6 +19,7 @@ struct of_controller{
 struct of_switch{
 	enum rw_status  	rw;
 	enum ofp_type 		of_status;
+	uint8_t			reading_header;
 	uint32_t 		xid;
 	uint32_t 		socket_fd;
 	uint16_t 		bytes_read;

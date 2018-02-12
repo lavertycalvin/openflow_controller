@@ -75,6 +75,35 @@ void read_from(struct of_switch *hi_switch){
 	//fprintf(stderr, "Total bytes read from socket fd %d so far: %d\n", hi_switch->socket_fd, hi_switch->bytes_read);
 }
 
+
+void set_config(struct of_switch *lost_switch){
+	struct ofp_switch_config *config = (struct ofp_switch_config *)lost_switch->write_buffer;
+	config->header.version = OFP_VERSION;
+	config->header.type    = OFPT_SET_CONFIG;
+	config->header.length  = htons(sizeof(struct ofp_switch_config)); /* 12 bytes */ 
+	config->header.xid     = htonl(lost_switch->xid++);
+
+	config->flags          = OFPC_FRAG_NORMAL;
+	config->miss_send_len  = htons(128); /* tbh idk what this value is yet */
+
+	lost_switch->of_status      = OFPT_SET_CONFIG;
+	lost_switch->bytes_expected = sizeof(struct ofp_switch_config);
+        lost_switch->rw             = WRITE;	
+}
+
+
+void read_config(struct of_switch *set_switch){
+	struct ofp_switch_config *config = (struct ofp_switch_config *)set_switch->read_buffer;
+	fprintf(stderr, "CONFIG ON SWITCH:\n"
+			"\tFlags           : 0x%08x\n"
+			"\tMiss Send Length: %d\n",
+			config->flags, ntohs(config->miss_send_len));
+
+	set_switch->bytes_expected = sizeof(struct ofp_switch_config);
+	set_switch->rw             = READ;	
+
+}	
+
 void request_features(struct of_switch *n_switch){
 	struct ofp_switch_features *feats = (struct ofp_switch_features *)n_switch->write_buffer;
 	feats->header.version = OFP_VERSION;
@@ -82,52 +111,49 @@ void request_features(struct of_switch *n_switch){
 	feats->header.length  = htons(sizeof(struct ofp_header));
 	feats->header.xid     = htonl(n_switch->xid++);
 	
-	n_switch->rw             = WRITE; /* set to write */
 	n_switch->bytes_expected = ntohs(feats->header.length); /* only expect to send a header */
-	fprintf(stderr, "\n\n========================\n"
-			"= SENDING FEATURES REQ =\n"
-			"========================\n\n");   
+	//fprintf(stderr, "\n\n========================\n"
+	//		"= SENDING FEATURES REQ =\n"
+	//		"========================\n\n");   
 
+	/* set controller to write feature request to switch */
+	n_switch->of_status = OFPT_FEATURES_REQUEST;
+	n_switch->bytes_expected = sizeof(struct ofp_header);
+	n_switch->rw = WRITE;
 }
 
 void read_features(struct of_switch *feat_switch){
-	struct ofp_switch_features *feats = (struct ofp_switch_features *)feat_switch->read_buffer;
-	fprintf(stderr, "Features of Switch:\n"
-			"\tDatapath-id: %d\n"
-			"\tNumber of Buffers: %d\n"
-			"\tNumber of Tables : %d\n"
-			"\tAux-id     : %d\n",
-			ntohl(feats->datapath_id), ntohl(feats->n_buffers), 
-			feats->n_tables, feats->auxiliary_id); 
+	//struct ofp_switch_features *feats = (struct ofp_switch_features *)feat_switch->read_buffer;
+	//fprintf(stderr, "Features of Switch:\n"
+	//		"\tDatapath-id      : %d\n"
+	//		"\tNumber of Buffers: %d\n"
+	//		"\tNumber of Tables : %d\n"
+	//		"\tAux-id           : %d\n"
+	//		"\tCapabilities     : 0x%08x\n",
+	//		ntohl(feats->datapath_id), ntohl(feats->n_buffers), 
+	//		feats->n_tables, feats->auxiliary_id, ntohl(feats->capabilities)); 
 	/* TO DO: Note that the datapath-id is a 64-bit value, upper 16-bits are implementer-designed,
 	 * Lower 48 bits are mac address */
-
-	feat_switch->bytes_read = 0;
+	
+	/* set controller to listen more to switch */
+	feat_switch->rw = READ;
 	feat_switch->bytes_expected = sizeof(struct ofp_header);
-	feat_switch->of_status  = OFPT_ERROR;
-	feat_switch->rw         = READ;
-
+	feat_switch->reading_header = 1;
 }
 
 /* OPENFLOW HELLO FUNCTIONS */
 void read_openflow_hello(struct of_switch *reading_switch){	
 	struct ofp_hello *ofp_hdr = (struct ofp_hello *)reading_switch->read_buffer;
-	//reading_switch->xid        = ntohl(ofp_hdr->header.xid); /* save the xid of the switch */
-	fprintf(stderr, "Received Openflow Hello:\n"
-			"\tVersion: %d\n"
-			"\tType   : %d\n"
-			"\tLength : %d\n"
-			"\txid    : %d\n", 
-			ofp_hdr->header.version, ofp_hdr->header.type, 
-			ntohs(ofp_hdr->header.length), ntohl(ofp_hdr->header.xid));
-
+	
 	if(ofp_hdr->header.version != OFP_VERSION){
 		fprintf(stderr, "Switch not using version 1.3! Closing connection!\n");
 		/* TO DO: close the connection.... */
 	}
-
-	reading_switch->bytes_read     = 0;
-	request_features(reading_switch);
+	
+	/* after reading hello, listen more to switch */
+	reading_switch->rw = READ;
+	reading_switch->bytes_expected = sizeof(struct ofp_header);
+	reading_switch->reading_header = 1;
 }
 
 void write_openflow_hello(struct of_switch *listening_switch){
@@ -135,24 +161,15 @@ void write_openflow_hello(struct of_switch *listening_switch){
 	ofp_hdr->header.version = OFP_VERSION;
 	ofp_hdr->header.type    = OFPT_HELLO;
 	ofp_hdr->header.length  = htons(sizeof(struct ofp_header));
-	ofp_hdr->header.xid     = htonl(listening_switch->xid);
-	fprintf(stderr, "Sending Openflow Hello:\n"
-			"\tVersion: %d\n"
-			"\tType   : %d\n"
-			"\tLength : %d\n"
-			"\txid    : %d\n", 
-			ofp_hdr->header.version, ofp_hdr->header.type, 
-			ntohs(ofp_hdr->header.length), ntohl(ofp_hdr->header.xid));
-	
-	listening_switch->rw             = WRITE; /* set to write */
-	listening_switch->bytes_expected = ntohs(ofp_hdr->header.length); /* only expect to send a header */
+	ofp_hdr->header.xid     = htonl(listening_switch->xid++);
+
+	listening_switch->rw = WRITE;
+	listening_switch->of_status = OFPT_HELLO;
+	listening_switch->bytes_expected = sizeof(struct ofp_header);	
 }
 /* END OPENFLOW HELLO FUNCTIONS */
 
-
-
 void write_echo_request(struct of_switch *echo_switch);
-
 void read_echo_reply(struct of_switch *echo_switch);
 
 void write_echo_reply(struct of_switch *echo_switch){
@@ -161,36 +178,30 @@ void write_echo_reply(struct of_switch *echo_switch){
 	ofp_hdr_send->version = OFP_VERSION;
 	ofp_hdr_send->type    = OFPT_ECHO_REPLY;
 	ofp_hdr_send->length  = ofp_hdr_recv->length; /* send as much as received */
-	ofp_hdr_send->xid     = echo_switch->xid;
+	ofp_hdr_send->xid     = ofp_hdr_recv->xid; /* send back the same xid as request */
 
 	/* memcpy over the rest of the echo_request into the write buffer */
-	memcpy(echo_switch->write_buffer + sizeof(struct ofp_header),
-	       echo_switch->read_buffer  + sizeof(struct ofp_header),
-	       ntohs(ofp_hdr_recv->length) - sizeof(struct ofp_header));
-
+	if(ntohs(ofp_hdr_recv->length) - sizeof(struct ofp_header) != 0){
+		memcpy(echo_switch->write_buffer + sizeof(struct ofp_header),
+	       	       echo_switch->read_buffer  + sizeof(struct ofp_header),
+	       	       ntohs(ofp_hdr_recv->length) - sizeof(struct ofp_header));
+	}
 	
-	fprintf(stderr, "Writing Echo Reply:\n"
-			"\tVersion: %d\n"
-			"\tType   : %d\n"
-			"\tLength : %d\n"
-			"\txid    : %d\n", 
-			ofp_hdr_send->version, ofp_hdr_send->type, ntohs(ofp_hdr_send->length), ntohl(ofp_hdr_send->xid));
-	
-	/* set switch to write with the appropriate number of bytes expected */	
-	echo_switch->rw             = WRITE; /* set to write */
+	echo_switch->rw = WRITE;
+	echo_switch->of_status = OFPT_ECHO_REPLY;
 	echo_switch->bytes_expected = ntohs(ofp_hdr_send->length); /* only expect to send a header */
-	echo_switch->of_status      = OFPT_ECHO_REPLY;
 }
 
+/* should never have to read an echo request (unless it's malformed).
+ * If malformed, theres a bigger problem */
 void read_echo_request(struct of_switch *echo_switch){
-	struct ofp_header *ofp_hdr = (struct ofp_header *)echo_switch->read_buffer;
-	fprintf(stderr, "Reading Echo Request:\n"
-			"\tVersion: %d\n"
-			"\tType   : %d\n"
-			"\tLength : %d\n"
-			"\txid    : %d\n", 
-			ofp_hdr->version, ofp_hdr->type, ntohs(ofp_hdr->length), ntohl(ofp_hdr->xid));
-	write_echo_reply(echo_switch);
+	//struct ofp_header *ofp_hdr = (struct ofp_header *)echo_switch->read_buffer;
+	//fprintf(stderr, "Reading Echo Request:\n"
+	//		"\tVersion: %d\n"
+	//		"\tType   : %d\n"
+	//		"\tLength : %d\n"
+	//		"\txid    : %d\n", 
+	//		ofp_hdr->version, ofp_hdr->type, ntohs(ofp_hdr->length), ntohl(ofp_hdr->xid));
 }
 
 void write_error(struct of_switch *e_switch){
@@ -201,7 +212,7 @@ void write_error(struct of_switch *e_switch){
 	ofp_hdr->header.version = OFP_VERSION;
 	ofp_hdr->header.type    = OFPT_ERROR;
 	ofp_hdr->header.length  = htons(sizeof(struct ofp_header));
-	ofp_hdr->header.xid     = htonl(e_switch->xid);
+	ofp_hdr->header.xid     = htonl(e_switch->xid++);
 	fprintf(stderr, "Sending Openflow ERROR:\n"
 			"\tVersion: %d\n"
 			"\tType   : %d\n"
@@ -213,16 +224,6 @@ void write_error(struct of_switch *e_switch){
 void read_error(struct of_switch *e_switch){
 	struct ofp_error_msg *ofp_error = (struct ofp_error_msg *)e_switch->read_buffer;
 	
-	/* DESIGN CHOICE: I did not want to make another enum for processing a packet
-	 * and then deciding where to send it. Instead, I assume the incoming packet
-	 * is an error, check the type, and if it is not an error, I will change the type
-	 * for the switch and pass back to the read function */
-	if(ofp_error->header.type != OFPT_ERROR){
-		e_switch->of_status = ofp_error->header.type;
-		//e_switch->bytes_expected = ntohs(ofp_hdr->header.length) - sizeof(struct ofp_header);
-		return;
-	}
-	
 	print_of_header(ofp_error->header);	
 	fprintf(stderr, "\n\tERROR MESSAGE:\n"
 			"\t\tType: %d\n"
@@ -231,4 +232,72 @@ void read_error(struct of_switch *e_switch){
 	
 	/* write openflow response into the write buffer */
 	write_error(e_switch);
+}
+
+
+/* multipart request to get all the data for all ports on
+ * connected switch */
+void get_port_info(struct of_switch *unk_switch){
+	struct ofp_multipart_request *multi = (struct ofp_multipart_request *)unk_switch->write_buffer;
+	multi->header.version = OFP_VERSION;
+	multi->header.type    = OFPT_MULTIPART_REQUEST;
+	multi->header.length  = htons(sizeof(struct ofp_multipart_request) + sizeof(struct ofp_port_stats_request));
+	multi->header.xid     = htonl(unk_switch->xid++);
+
+	multi->type = htons(OFPMP_PORT_STATS); 
+	multi->flags = htons(0); //lol
+	
+	/* want port stats for all ports on switch */
+	struct ofp_port_stats_request *stats = (struct ofp_port_stats_request *)multi->body;
+	stats->port_no = htonl(OFPP_ANY);
+	
+	
+	unk_switch->rw = WRITE;
+	unk_switch->of_status = OFPT_MULTIPART_REQUEST;
+	unk_switch->bytes_expected = ntohs(multi->header.length); /* only expect to send a header */
+}
+
+void write_flow_mod(struct of_switch *needs_help){
+
+}
+
+void read_packet_in(struct of_switch *r_switch){
+	struct ofp_packet_in *pkt = (struct ofp_packet_in *)r_switch->read_buffer;
+	fprintf(stderr, "\n=================="
+			"\n=== Packet in ==="
+			"\n================="
+			"\tBuffer ID: 0x%08x\n"
+			"\tTotal Len: %d\n"
+			"\tReason   : %d\n"
+			"\tTable ID : %d"
+			"\n=================\n\n",
+			ntohl(pkt->buffer_id), ntohs(pkt->total_len),
+			pkt->reason, pkt->table_id);
+	
+	/* TO DO: Currently when a packet comes in, we read it in, 
+	 * and then do nothing with it! */
+	r_switch->rw = READ;
+	r_switch->bytes_expected = sizeof(struct ofp_header);
+	r_switch->reading_header = 1;
+}
+
+
+void handle_multipart_reply(struct of_switch *loaded_switch){
+	struct ofp_multipart_reply *multi = (struct ofp_multipart_reply *)loaded_switch->read_buffer;
+	
+	switch(ntohs(multi->type)){
+		case OFPMP_PORT_STATS :
+			//fprintf(stderr, "Multipart message concerning ports!\n");
+			break;
+
+		default :
+			//fprintf(stderr, "Multipart Message not supported yet!\n");
+			break;
+	
+	}
+	
+	/* after reading hello, listen more to switch */
+	loaded_switch->rw = READ;
+	loaded_switch->bytes_expected = sizeof(struct ofp_header);
+	loaded_switch->reading_header = 1;
 }

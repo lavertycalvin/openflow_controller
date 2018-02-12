@@ -27,4 +27,14 @@ void write_echo_reply(struct of_switch *echo_switch);
 void read_echo_reply(struct of_switch *echo_switch);
 
 void read_features(struct of_switch *feat_switch);
+void request_features(struct of_switch *feat_switch);
+
+void set_config(struct of_switch *lost_switch);
+void read_config(struct of_switch *set_switch);
+
+void read_packet_in(struct of_switch *r_switch);
+
+void handle_multipart_reply(struct of_switch *loaded_switch);
+
+void get_port_info(struct of_switch *unk_switch);
 #endif
