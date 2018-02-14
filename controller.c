@@ -227,7 +227,7 @@ void handle_read_socket(struct of_switch *talking_switch){
 		talking_switch->bytes_expected = ntohs(((struct ofp_header *)talking_switch->read_buffer)->length) - sizeof(struct ofp_header);	
 		talking_switch->reading_header = 0;
 		if(talking_switch->bytes_expected != 0){
-			fprintf(stderr, "Reading a header... expecting %d more bytes!\n", talking_switch->bytes_expected);
+			//fprintf(stderr, "Reading a header... expecting %d more bytes!\n", talking_switch->bytes_expected);
 			return;
 		}
 	}
@@ -255,7 +255,7 @@ void handle_read_socket(struct of_switch *talking_switch){
 			break;	
 		
 		case OFPT_PACKET_IN :
-			//read_packet_in(talking_switch);
+			read_packet_in(talking_switch);
 			break;
 			
 		case OFPT_MULTIPART_REPLY :
@@ -434,7 +434,7 @@ int main(int argc, char **argv){
 		exit(1);
 	}
 
-	fprintf(stdout, "Controller listening on TCP port %d\n", get_port((struct sockaddr *)server->ai_addr));
+	fprintf(stdout, "Controller listening %s:%d\n", controller_addr, get_port((struct sockaddr *)server->ai_addr));
 
 	fflush(stdout);
 

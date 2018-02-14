@@ -192,11 +192,12 @@ void read_port_change(struct of_switch *uneasy_switch){
 	struct ofp_port *port = (struct ofp_port *)&status->desc; 
 	fprintf(stderr, "\nXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 			"\nXXXXXX PORT CHANGE! OH NOOOOOO XXXXXXX"
+			"\n\tSwitch Number    : %d"
 			"\n\tPort that changed: %u"
 			"\n\tName  of port    : %s"
 			"\n\tState of port    : 0x%02x (1 is down, 0 is up)"
 			"\nXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n\n",
-			ntohl(port->port_no), port->name, ntohl(port->state));
+			uneasy_switch->socket_fd, ntohl(port->port_no), port->name, ntohl(port->state));
 	
 	/* after reading port change, listen more to switch */
 	uneasy_switch->rw = READ;
@@ -286,25 +287,48 @@ void write_flow_mod(struct of_switch *needs_help){
 }
 
 void read_packet_in(struct of_switch *r_switch){
-	//struct ofp_packet_in *pkt = (struct ofp_packet_in *)r_switch->read_buffer;
-	//fprintf(stderr, "\n================="
-	//		"\n=== Packet in ==="
-	//		"\n=================\n"
-	//		"  Buffer ID: 0x%08x\n"
-	//		"  Total Len: %d\n"
-	//		"  Reason   : %d\n"
-	//		"  Table ID : %d"
-	//		"\n=================\n\n",
-	//		ntohl(pkt->buffer_id), ntohs(pkt->total_len),
-	//		pkt->reason, pkt->table_id);
+	struct ofp_packet_in *pkt = (struct ofp_packet_in *)r_switch->read_buffer;
+	fprintf(stderr, "\n================="
+			"\n=== Packet in ==="
+			"\n=================\n"
+			"  Switch   : %d\n"
+			"  Buffer ID: 0x%08x\n"
+			"  Total Len: %d\n"
+			"  Reason   : %d\n"
+			"  Table ID : %d"
+			"\n=================\n\n",
+			r_switch->socket_fd, ntohl(pkt->buffer_id), ntohs(pkt->total_len),
+			pkt->reason, pkt->table_id);
 	
 	/* TO DO: Currently when a packet comes in, we read it in, 
 	 * and then do nothing with it! */
-	//r_switch->rw = READ;
-	//r_switch->bytes_expected = sizeof(struct ofp_header);
-	//r_switch->reading_header = 1;
+	r_switch->rw = READ;
+	r_switch->bytes_expected = sizeof(struct ofp_header);
+	r_switch->reading_header = 1;
+	r_switch->bytes_read     = 0;
 }
 
+/* length is the length of the ENTIRE openflow packet */
+void print_port_stats(struct ofp_port_stats *ports, uint16_t packet_length){
+	packet_length -= sizeof(struct ofp_multipart_reply); //now the length should be just ports
+	int num_ports = packet_length / sizeof(struct ofp_port_stats); // get num of ports included
+	fprintf(stderr, "<><><><><><><><><><><><><><><><>\n"
+			"<><><><><> PORT STATS <><><><><>\n"
+			"<><><><><><><><><><><><><><><><>\n\n");
+	
+	int i = 0;
+	for(i = 0; i < num_ports; i++){
+		fprintf(stderr, "<>\tPort Number: %08u<>\n"
+				"<>\tDuration   : %08u<>\n"
+				"<>\tRx Packets : %08lu<>\n"
+				"<>\tTx Packets : %08lu<>\n"
+				"<>\tRx Dropped : %08lu<>\n"
+				"<>\tTx Dropped : %08lu<>\n\n\n",
+		ports[i].port_no, ports[i].duration_sec, ports[i].rx_packets, 
+		ports[i].tx_packets, ports[i].rx_dropped, ports[i].tx_dropped);
+	}
+	fprintf(stderr, "<><><><><><><><><><><><><><><><>\n\n");
+}
 
 void handle_multipart_reply(struct of_switch *loaded_switch){
 	struct ofp_multipart_reply *multi = (struct ofp_multipart_reply *)loaded_switch->read_buffer;
@@ -312,6 +336,7 @@ void handle_multipart_reply(struct of_switch *loaded_switch){
 	switch(ntohs(multi->type)){
 		case OFPMP_PORT_STATS :
 			fprintf(stderr, "Multipart message concerning ports!\n");
+			print_port_stats((struct ofp_port_stats *)&multi->body[0], ntohs(multi->header.length));
 			break;
 
 		default :
