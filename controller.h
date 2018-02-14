@@ -10,6 +10,7 @@ enum rw_status{
 	DISCONNECTED
 };
 
+
 struct of_controller{
 	uint64_t num_connected_switches; /* hold number of connected switches */
 	uint32_t max_connected_switches; /* upper limit of all connected switches */
@@ -29,6 +30,9 @@ struct of_switch{
 	char 			*write_buffer;
 	uint16_t 		write_buffer_size;
 	uint16_t 		read_buffer_size;
+	uint8_t 		config_set; /* boolean if set or not */
+	uint8_t 		ports_requested; /* if ports requested already */
+	uint8_t                 features_requested;
 };
 
 

@@ -98,27 +98,33 @@ void setup_new_switch(int fd){
 	struct of_switch *new_switch = &idk_man.switch_list[idk_man.num_connected_switches];
 	
 	/* add switch to the pool */
-	new_switch->rw 			= READ; 	/* expecting a message from switch */
+	new_switch->rw 			= WRITE; 	/* expecting a message from switch */
 	new_switch->of_status 		= OFPT_HELLO;   /* expecting a hello message */
 	new_switch->socket_fd 		= fd;
 	new_switch->bytes_read 		= 0;
 	new_switch->bytes_written 	= 0;
 	new_switch->bytes_expected 	= sizeof(struct ofp_header); /* expecting hello message */
+	new_switch->reading_header      = 1;
 	new_switch->read_buffer_size    = 1500;
 	new_switch->write_buffer_size   = 1500;
 	new_switch->xid 		= xid_generator;
 	new_switch->read_buffer   	= calloc(sizeof(char),  new_switch->read_buffer_size);
 	new_switch->write_buffer  	= calloc(sizeof(char),  new_switch->write_buffer_size);
+	new_switch->ports_requested     = 0;
+	new_switch->config_set          = 0;
+	new_switch->features_requested  = 0;
 	if((new_switch->read_buffer  == NULL) || (new_switch->write_buffer == NULL)){
 		fprintf(stderr, "Unable to initialize buffers for switch %lu. "
 				"Exiting...\n", idk_man.num_connected_switches);
 		controller_exit();
 	}
 	
+	make_non_blocking(fd);
 	idk_man.num_connected_switches++;
 	xid_generator++;
 
 	write_openflow_hello(new_switch);
+
 	
 	//check to see if we need to change largest fd
 	if(fd > largest_fd){
@@ -153,16 +159,10 @@ void create_listening_socket(char *char_address){
 		
 		if(listening_socket_fd == -1){
 			//error creating the socket
-			//fprintf(stderr, "Create socket error...\n");
+			fprintf(stderr, "Create socket error...\n");
 			continue;
 		}
-		if(char_address == NULL){ //not passed an address
-			//turn off the IPv6 Only option
-			int no = 0;
-			//fprintf(stderr, "Setting socket options!\n");
-			setsockopt(listening_socket_fd, IPPROTO_IPV6, IPV6_V6ONLY, (void *)&no, sizeof(no)); 
-		}
-		//fprintf(stderr, "Designated FD for listening socket: %d\n", listening_socket_fd);
+		
 		bind_ret = bind(listening_socket_fd, server->ai_addr, server->ai_addrlen);
 		if(bind_ret == -1){
 			close(listening_socket_fd);
@@ -187,6 +187,7 @@ void remake_select_sets(){
 
 	//initialize listening socket every time	
 	FD_SET(listening_socket_fd, &read_sockets);
+	FD_SET(listening_socket_fd, &error_sockets);
 	
 	/* loop through all connected switches */
 	int i = 0; 
@@ -215,109 +216,101 @@ void remake_select_sets(){
 void handle_read_socket(struct of_switch *talking_switch){
 	if(talking_switch->bytes_expected != 0){
 		read_from(talking_switch);
-		return;
+		if(talking_switch->bytes_expected != 0){
+			return;
+		}
 	}
 
 	if(talking_switch->reading_header){
 		/* read the type and how much more to expect! */
 		talking_switch->of_status = ((struct ofp_header *)talking_switch->read_buffer)->type;
 		talking_switch->bytes_expected = ntohs(((struct ofp_header *)talking_switch->read_buffer)->length) - sizeof(struct ofp_header);	
-		//fprintf(stderr, "Reading a header... expecting %d more bytes!\n", talking_switch->bytes_expected);
 		talking_switch->reading_header = 0;
 		if(talking_switch->bytes_expected != 0){
+			fprintf(stderr, "Reading a header... expecting %d more bytes!\n", talking_switch->bytes_expected);
 			return;
 		}
 	}
 	
+	//fprintf(stderr, "Type currently: %d\n", talking_switch->of_status);
 	/* At this point, the entire packet has been read in
 	 * and type has been set appropriately */
 	switch(talking_switch->of_status){
+		case OFPT_ECHO_REQUEST : 
+			/* after getting a request, respond! */
+			//fprintf(stderr, "READ AN ECHO REQUEST!\n");
+			make_echo_reply(talking_switch);
+			break;	
+		
 		case OFPT_HELLO :
 			//fprintf(stderr, "We are reading an OFPT_HELLO!\n");
 			read_openflow_hello(talking_switch);	
 			/* after reading hello, send our features request */
-			request_features(talking_switch);
+			//write_openflow_hello(talking_switch);
 			break;
-		
-		case OFPT_ECHO_REQUEST : 
-			/* after getting a request, respond! */
-			write_echo_reply(talking_switch);
-			break;	
 	
 		case OFPT_FEATURES_REPLY :
 			read_features(talking_switch);
 			/* set config for the switch */
-			set_config(talking_switch);
 			break;	
 		
 		case OFPT_PACKET_IN :
-			read_packet_in(talking_switch);
+			//read_packet_in(talking_switch);
 			break;
 			
 		case OFPT_MULTIPART_REPLY :
-		        handle_multipart_reply(talking_switch);
+		        //fprintf(stderr, "Multipart reply!\n");
+			handle_multipart_reply(talking_switch);
 	       		break;	       
+		
+		case OFPT_PORT_STATUS :
+			/* an asynchronous event when link goes
+			 * up or down */
+			read_port_change(talking_switch);
+			break;
 		
 		default:
 			/* assume it is an error at first */
 			fprintf(stderr, "This is an error!\n");
 			break;
 	}
-
-	/* reset how many bytes have been read to read in to
-	 * the beginning of the read buffer */
-	talking_switch->bytes_read = 0;
 }
 
 void handle_write_socket(struct of_switch *listening_switch){
 	if(listening_switch->bytes_expected != 0){
 		write_to(listening_switch);
-		return;
+		if(listening_switch->bytes_expected != 0){
+			return;
+		}
 	}
-	/* this switch if for what happened just before:
-	 * e.g. just sent a hello, listen for next packet! */
-	switch(listening_switch->of_status){
-		case OFPT_HELLO :
-			break;
-		
-		case OFPT_ECHO_REPLY : 
-			break;	
-		
-		case OFPT_FEATURES_REQUEST :
-			break;	
-		
-		case OFPT_SET_CONFIG :
-			/* after setting config, request port info */
-			//get_port_info(listening_switch);
-			break;	
-		case OFPT_MULTIPART_REQUEST :
-			//fprintf(stderr, "Just finished sending multipart request!\n");
-			break;
-		
-		default:
-			/* assume it is an error at first */
-			break;
+
+	if(!listening_switch->features_requested){
+		request_features(listening_switch);
+		listening_switch->features_requested = 1;
 	}
-	
-	/* finished sending a packet, reset the bytes written to write 
-	 * into the beginning of the write buffer! */
-	listening_switch->bytes_written  = 0; //reset write
-	
-	/* if we don't already have a packet queued, we can listen 
-	 * for more packets on this socket */	
-	if(listening_switch->bytes_expected == 0){
+	else if(!listening_switch->config_set){
+		set_config(listening_switch);
+		listening_switch->config_set = 1;
+	}
+	else if(!listening_switch->ports_requested){
+		get_port_info(listening_switch);
+		listening_switch->ports_requested = 1;
+	}
+	else{
 		listening_switch->rw = READ;
-		/* expect to read in the initial Openflow header */
 		listening_switch->bytes_expected = sizeof(struct ofp_header);
 		listening_switch->reading_header = 1;
 	}
-	
+	listening_switch->bytes_written = 0;
 }
 
 /* loop through all connected switches and split into read and write states */
 void handle_all_sockets(){
 	if(FD_ISSET(listening_socket_fd, &read_sockets)){
 		create_new_connection();
+	}
+	if(FD_ISSET(listening_socket_fd, &error_sockets)){
+		fprintf(stderr, "ERROR ON LISTENING SOCKET!\n");
 	}
 	
 	int i = 0;

@@ -12,7 +12,7 @@ if __name__ == '__main__':
     setLogLevel('info')
     net = Mininet()                                                                                                       
     c0 = net.addController('calvin-controller', controller=RemoteController,
-                             ip='127.0.0.1', port=6653)
+                             ip='10.0.0.250', port=6653)
     
     h1 = net.addHost( 'h1' )                                                                                              
     h2 = net.addHost( 'h2' )                                                                                              
