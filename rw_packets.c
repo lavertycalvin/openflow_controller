@@ -287,18 +287,18 @@ void write_flow_mod(struct of_switch *needs_help){
 }
 
 void read_packet_in(struct of_switch *r_switch){
-	struct ofp_packet_in *pkt = (struct ofp_packet_in *)r_switch->read_buffer;
+	//struct ofp_packet_in *pkt = (struct ofp_packet_in *)r_switch->read_buffer;
 	fprintf(stderr, "\n================="
 			"\n=== Packet in ==="
-			"\n=================\n"
-			"  Switch   : %d\n"
-			"  Buffer ID: 0x%08x\n"
-			"  Total Len: %d\n"
-			"  Reason   : %d\n"
-			"  Table ID : %d"
-			"\n=================\n\n",
-			r_switch->socket_fd, ntohl(pkt->buffer_id), ntohs(pkt->total_len),
-			pkt->reason, pkt->table_id);
+			"\n=================\n");
+	//		"  Switch   : %d\n"
+	//		"  Buffer ID: 0x%08x\n"
+	//		"  Total Len: %d\n"
+	//		"  Reason   : %d\n"
+	//		"  Table ID : %d"
+	//		"\n=================\n\n",
+	//		r_switch->socket_fd, ntohl(pkt->buffer_id), ntohs(pkt->total_len),
+	//		pkt->reason, pkt->table_id);
 	
 	/* TO DO: Currently when a packet comes in, we read it in, 
 	 * and then do nothing with it! */
