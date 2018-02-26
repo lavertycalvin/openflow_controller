@@ -3,6 +3,7 @@
 #include "controller.h"
 #include <netinet/in.h>
 #include "openflow.h"
+#include "flows.h"
 #include "string.h"
 
 void resize_buffer(struct of_switch *full_switch, int buffer){
@@ -189,7 +190,7 @@ void read_echo_reply(struct of_switch *echo_switch);
 
 void read_port_change(struct of_switch *uneasy_switch){
 	struct ofp_port_status *status = (struct ofp_port_status *)uneasy_switch->read_buffer;
-	struct ofp_port *port = (struct ofp_port *)&status->desc; 
+	struct ofp_port *port = (struct ofp_port *)&status->desc;
 	fprintf(stderr, "\nXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 			"\nXXXXXX PORT CHANGE! OH NOOOOOO XXXXXXX"
 			"\n\tSwitch Number    : %d"
@@ -282,23 +283,48 @@ void get_port_info(struct of_switch *unk_switch){
 	unk_switch->bytes_expected = ntohs(multi->header.length); /* only expect to send a header */
 }
 
-void write_flow_mod(struct of_switch *needs_help){
+void write_default_miss(struct of_switch *needs_help){
+	struct ofp_flow_mod *mod = (struct ofp_flow_mod *)needs_help->write_buffer;
+	mod->header.type    = OFPT_FLOW_MOD;
+	mod->header.version = OFP_VERSION;
+	mod->header.length  = htons(sizeof(struct ofp_flow_mod));	
+	mod->header.xid     = htonl(needs_help->xid);
 
+	mod->table_id    = 0; //apply default miss to first table
+	mod->cookie      = 0;
+	mod->cookie_mask = 0;
+	mod->command     = OFPFC_ADD;
+	mod->idle_timeout = htons(0); //never time out
+	mod->hard_timeout = htons(0); //never time out
+	mod->priority     = htons(0); // lowest priority
+	mod->buffer_id    = htonl(OFP_NO_BUFFER); //not applied to buffered packet
+
+	mod->out_port     = htonl(OFPP_ANY);
+	mod->out_group    = htonl(OFPG_ANY);
+	mod->flags        = htons(OFPFF_SEND_FLOW_REM | OFPFF_CHECK_OVERLAP | OFPFF_RESET_COUNTS);
+	mod->match.type = htons(OFPMT_OXM);
+	mod->match.length = htons(sizeof(struct ofp_match));
+	
 }
 
+void write_flow_mod(struct of_switch *mod_sw);
+
+
 void read_packet_in(struct of_switch *r_switch){
-	//struct ofp_packet_in *pkt = (struct ofp_packet_in *)r_switch->read_buffer;
+	struct ofp_packet_in *pkt = (struct ofp_packet_in *)r_switch->read_buffer;
 	fprintf(stderr, "\n================="
 			"\n=== Packet in ==="
-			"\n=================\n");
-	//		"  Switch   : %d\n"
-	//		"  Buffer ID: 0x%08x\n"
-	//		"  Total Len: %d\n"
-	//		"  Reason   : %d\n"
-	//		"  Table ID : %d"
-	//		"\n=================\n\n",
-	//		r_switch->socket_fd, ntohl(pkt->buffer_id), ntohs(pkt->total_len),
-	//		pkt->reason, pkt->table_id);
+			"\n=================\n"
+			"  Switch   : %d\n"
+			"  Buffer ID: 0x%08x\n"
+			"  Total Len: %d\n"
+			"  Reason   : %d\n"
+			"  Table ID : %d"
+			"\n=================\n\n",
+			r_switch->socket_fd, ntohl(pkt->buffer_id), ntohs(pkt->total_len),
+			pkt->reason, pkt->table_id);
+	
+	write_flow_mod(r_switch);
 	
 	/* TO DO: Currently when a packet comes in, we read it in, 
 	 * and then do nothing with it! */
