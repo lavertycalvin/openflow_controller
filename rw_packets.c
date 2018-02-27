@@ -288,28 +288,56 @@ void write_default_miss(struct of_switch *needs_help){
 	struct ofp_flow_mod *mod = (struct ofp_flow_mod *)needs_help->write_buffer;
 	mod->header.type    = OFPT_FLOW_MOD;
 	mod->header.version = OFP_VERSION;
-	mod->header.length  = htons(sizeof(struct ofp_flow_mod));	
-	mod->header.xid     = htonl(needs_help->xid);
+	mod->header.length  = htons(sizeof(struct ofp_flow_mod) + sizeof(struct ofp_instruction_actions) + sizeof(struct ofp_action_output));	
+	mod->header.xid     = htonl(needs_help->xid++);
 
-	mod->table_id    = 0; //apply default miss to first table
-	mod->cookie      = 0;
-	mod->cookie_mask = 0;
-	mod->command     = OFPFC_ADD;
+	mod->table_id     = 0; //apply default miss to first table
+	mod->cookie       = 0;
+	mod->cookie_mask  = 0;
+	mod->command      = OFPFC_ADD;
 	mod->idle_timeout = htons(0); //never time out
 	mod->hard_timeout = htons(0); //never time out
 	mod->priority     = htons(0); // lowest priority
 	mod->buffer_id    = htonl(OFP_NO_BUFFER); //not applied to buffered packet
 
-	mod->out_port     = htonl(OFPP_ANY);
-	mod->out_group    = htonl(OFPG_ANY);
+	mod->out_port     = 0;
+	mod->out_group    = 0;
 	mod->flags        = htons(OFPFF_SEND_FLOW_REM | OFPFF_CHECK_OVERLAP | OFPFF_RESET_COUNTS);
-	mod->match.type = htons(OFPMT_OXM);
-	mod->match.length = htons(sizeof(struct ofp_match));
-	
+	mod->match.type   = htons(OFPMT_OXM);
+	mod->match.length = htons(4); //2 for type, 2 for length (but instruction comes 8 bytes after start
+
+	//now add the isntruction to the end of the 
+	struct ofp_instruction_actions *instr = (struct ofp_instruction_actions *)&needs_help->write_buffer[sizeof(struct ofp_flow_mod) + sizeof(struct ofp_match)];
+	instr->type = htons(OFPIT_APPLY_ACTIONS);
+	instr->len  = htons(sizeof(struct ofp_instruction_actions) + sizeof(struct ofp_action_output));
+
+	//now specify the action
+	struct ofp_action_output *action = (struct ofp_action_output *)instr->actions;
+	action->len  = htons(sizeof(struct ofp_action_output));
+	action->type = htons(OFPAT_OUTPUT);
+	action->port = htonl(OFPP_CONTROLLER);
+	action->max_len = htons(OFPCML_NO_BUFFER);	
 }
 
-void write_flow_mod(struct of_switch *mod_sw){
+void write_new_flow(struct of_switch *learning){
+	fprintf(stderr, "NEEDS A NEW FLOW BRO!\n");
+}
+
+void write_flow_mod(struct of_switch *mod_sw, int reason){
 	//plan on making a learning switch that matches on the first 
+	if(reason == DEFAULT_FLOW){
+		write_default_miss(mod_sw);
+	}
+	else if(reason == NEW_FLOW){
+		write_new_flow(mod_sw);	
+	}
+	else if(reason == UNKNOWN){
+		fprintf(stderr, "NOT A CHANCE MAN!\n");
+	}
+	else{
+		fprintf(stderr, "If you got here, something went REALLY wrong.\n");
+		exit(1);
+	}
 }
 
 
@@ -332,8 +360,9 @@ void read_packet_in(struct of_switch *r_switch){
 	 * if we do: write a flow mod
 	 * if not, flood the packet out of the rest of the ports
 	 *******************************************************/
-
-	write_flow_mod(r_switch);
+	
+	
+	write_flow_mod(r_switch, NEW_FLOW);
 	
 	/* TO DO: Currently when a packet comes in, we read it in, 
 	 * and then do nothing with it! */

@@ -1,4 +1,5 @@
 /* Controller.c
+ * :
  * Author: Calvin Laverty
  * Last Edit: 2/8/18
  */
@@ -126,6 +127,7 @@ void setup_new_switch(int fd){
 	new_switch->ports_requested     = 0;
 	new_switch->config_set          = 0;
 	new_switch->features_requested  = 0;
+	new_switch->default_flow_set    = 0;
 	new_switch->timeout		= 60; //set 60 second timeout
 	if((new_switch->read_buffer  == NULL) || (new_switch->write_buffer == NULL)){
 		fprintf(stderr, "Unable to initialize buffers for switch %lu. "
@@ -309,6 +311,10 @@ void handle_write_socket(struct of_switch *listening_switch){
 	else if(!listening_switch->ports_requested){
 		get_port_info(listening_switch);
 		listening_switch->ports_requested = 1;
+	}
+	else if(!listening_switch->default_flow_set){
+		write_flow_mod(listening_switch, DEFAULT_FLOW);
+		listening_switch->default_flow_set = 1;
 	}
 	else{
 		listening_switch->rw = READ;

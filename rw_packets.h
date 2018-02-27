@@ -10,6 +10,13 @@
 #define RESIZE_READ_BUFFER 1
 #define RESIZE_WRITE_BUFFER 2
 
+/* reasons to write a flow mod */
+enum{
+	DEFAULT_FLOW,
+	NEW_FLOW,
+	UNKNOWN
+};
+
 /* function defs */
 void write_openflow_hello(struct of_switch *listening_switch);	
 void read_openflow_hello(struct of_switch *hi_switch);
@@ -39,4 +46,6 @@ void handle_multipart_reply(struct of_switch *loaded_switch);
 void get_port_info(struct of_switch *unk_switch);
 
 void read_port_change(struct of_switch *uneasy_switch);
+
+void write_flow_mod(struct of_switch *mod_sw, int reason);
 #endif
