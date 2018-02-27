@@ -29,7 +29,7 @@ controller-$(EXEC_SUFFIX): controller.c rw_packets.c
 	$(CC) $(CFLAGS) $(OSINC) $(OSLIB) $(OSDEF) -o $@ controller.c checksum.c rw_packets.c smartalloc.c -lpcap
 
 handin: README
-	handin bellardo p1 README smartalloc.c smartalloc.h checksum.c checksum.h ping_spoof.c Makefile
+	handin bellardo p2_m2 README smartalloc.c smartalloc.h  Makefile
 
 clean:
 	-rm -rf controller-* controller-*.dSYM

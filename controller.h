@@ -33,6 +33,8 @@ struct of_switch{
 	uint8_t 		config_set; /* boolean if set or not */
 	uint8_t 		ports_requested; /* if ports requested already */
 	uint8_t                 features_requested;
+	uint8_t 		timeout; //in seconds
+	struct ofp_port 	connected_ports[50]; //right now assume 50 max ports
 };
 
 

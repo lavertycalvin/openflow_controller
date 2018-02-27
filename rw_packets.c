@@ -268,10 +268,10 @@ void get_port_info(struct of_switch *unk_switch){
 	struct ofp_multipart_request *multi = (struct ofp_multipart_request *)unk_switch->write_buffer;
 	multi->header.version = OFP_VERSION;
 	multi->header.type    = OFPT_MULTIPART_REQUEST;
-	multi->header.length  = htons(sizeof(struct ofp_multipart_request) + sizeof(struct ofp_port_stats_request));
+	multi->header.length  = htons(sizeof(struct ofp_multipart_request));
 	multi->header.xid     = htonl(unk_switch->xid++);
 
-	multi->type = htons(OFPMP_PORT_STATS); 
+	multi->type = htons(OFPMP_PORT_DESC); 
 	multi->flags = htons(0); //lol
 	
 	/* want port stats for all ports on switch */
@@ -307,7 +307,8 @@ void write_default_miss(struct of_switch *needs_help){
 	
 }
 
-void write_flow_mod(struct of_switch *mod_sw);
+void write_flow_mod(struct of_switch *mod_sw){
+}
 
 
 void read_packet_in(struct of_switch *r_switch){

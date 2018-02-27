@@ -16,6 +16,7 @@
 #include "openflow.h"
 #include "rw_packets.h"
 #include "controller.h"
+#include "smartalloc.h"
 
 
 /* GLOBAL DEFS */
@@ -41,13 +42,25 @@ fd_set error_sockets;
 
 /* Free all buffers for connected and used switches */
 void free_switch_buffers(struct of_switch *switches){
-
+	int i = 0;
+	for(; i < idk_man.num_connected_switches; i++){
+		if(switches->rw != DISCONNECTED){
+			if(switches->read_buffer != NULL){
+				free(switches->read_buffer);
+			}
+			if(switches->write_buffer != NULL){
+				free(switches->write_buffer);
+			}
+		}
+	}	
 }
 
 /* free all allocated memory held by the controller */
 void free_controller_mem(){
 	free_switch_buffers(idk_man.switch_list);
-	free(idk_man.switch_list);
+	if(idk_man.switch_list != NULL){
+		free(idk_man.switch_list);
+	}
 }
 
 /* when SIGINT is received, this is called to clean up */
@@ -113,6 +126,7 @@ void setup_new_switch(int fd){
 	new_switch->ports_requested     = 0;
 	new_switch->config_set          = 0;
 	new_switch->features_requested  = 0;
+	new_switch->timeout   		= 60; //set 60 second timeout
 	if((new_switch->read_buffer  == NULL) || (new_switch->write_buffer == NULL)){
 		fprintf(stderr, "Unable to initialize buffers for switch %lu. "
 				"Exiting...\n", idk_man.num_connected_switches);

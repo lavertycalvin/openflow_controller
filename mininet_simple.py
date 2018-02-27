@@ -10,16 +10,16 @@ from mininet.cli  import CLI
 
 if __name__ == '__main__':
     setLogLevel('info')
-    net = Mininet()                                                                                                       
+    net = Mininet()
     c0 = net.addController('calvin-controller', controller=RemoteController,
-                             ip='10.0.0.250', port=6653)
-    
-    h1 = net.addHost( 'h1' )                                                                                              
-    h2 = net.addHost( 'h2' )                                                                                              
+                             ip='127.0.0.1', port=6653)
+
+    h1 = net.addHost( 'h1' )
+    h2 = net.addHost( 'h2' )
     s1 = net.addSwitch( 's1' )
-    net.addLink( h1, s1 )                                                                                                 
-    net.addLink( h2, s1 )                                                                                                 
+    net.addLink( h1, s1 )
+    net.addLink( h2, s1 )
     net.start()
-    
+
     CLI(net)
     net.stop()
