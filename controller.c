@@ -126,7 +126,7 @@ void setup_new_switch(int fd){
 	new_switch->ports_requested     = 0;
 	new_switch->config_set          = 0;
 	new_switch->features_requested  = 0;
-	new_switch->timeout   		= 60; //set 60 second timeout
+	new_switch->timeout		= 60; //set 60 second timeout
 	if((new_switch->read_buffer  == NULL) || (new_switch->write_buffer == NULL)){
 		fprintf(stderr, "Unable to initialize buffers for switch %lu. "
 				"Exiting...\n", idk_man.num_connected_switches);

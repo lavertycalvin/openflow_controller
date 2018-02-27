@@ -200,6 +200,11 @@ void read_port_change(struct of_switch *uneasy_switch){
 			"\nXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n\n",
 			uneasy_switch->socket_fd, ntohl(port->port_no), port->name, ntohl(port->state));
 	
+	/******************************************
+	 * TO DO: change the network to mark the 
+	 * 	  port as unusable
+	 ******************************************/
+	
 	/* after reading port change, listen more to switch */
 	uneasy_switch->rw = READ;
 	uneasy_switch->bytes_expected = sizeof(struct ofp_header);
@@ -274,10 +279,6 @@ void get_port_info(struct of_switch *unk_switch){
 	multi->type = htons(OFPMP_PORT_DESC); 
 	multi->flags = htons(0); //lol
 	
-	/* want port stats for all ports on switch */
-	struct ofp_port_stats_request *stats = (struct ofp_port_stats_request *)multi->body;
-	stats->port_no = htonl(OFPP_ANY);
-	
 	unk_switch->rw = WRITE;
 	unk_switch->of_status = OFPT_MULTIPART_REQUEST;
 	unk_switch->bytes_expected = ntohs(multi->header.length); /* only expect to send a header */
@@ -308,6 +309,7 @@ void write_default_miss(struct of_switch *needs_help){
 }
 
 void write_flow_mod(struct of_switch *mod_sw){
+	//plan on making a learning switch that matches on the first 
 }
 
 
@@ -325,6 +327,12 @@ void read_packet_in(struct of_switch *r_switch){
 			r_switch->socket_fd, ntohl(pkt->buffer_id), ntohs(pkt->total_len),
 			pkt->reason, pkt->table_id);
 	
+	/******************************************************
+	 * check to see if we know what to do with the packet
+	 * if we do: write a flow mod
+	 * if not, flood the packet out of the rest of the ports
+	 *******************************************************/
+
 	write_flow_mod(r_switch);
 	
 	/* TO DO: Currently when a packet comes in, we read it in, 
@@ -345,16 +353,29 @@ void print_port_stats(struct ofp_port_stats *ports, uint16_t packet_length){
 	
 	int i = 0;
 	for(i = 0; i < num_ports; i++){
-		fprintf(stderr, "<>\tPort Number: %08u<>\n"
-				"<>\tDuration   : %08u<>\n"
-				"<>\tRx Packets : %08lu<>\n"
-				"<>\tTx Packets : %08lu<>\n"
-				"<>\tRx Dropped : %08lu<>\n"
-				"<>\tTx Dropped : %08lu<>\n\n\n",
+		fprintf(stderr, "<><>\tPort Number: %08u<><>\n"
+				"<><>\tDuration   : %08u<><>\n"
+				"<><>\tRx Packets : %08lu<><>\n"
+				"<><>\tTx Packets : %08lu<><>\n"
+				"<><>\tRx Dropped : %08lu<><>\n"
+				"<><>\tTx Dropped : %08lu<><>\n\n\n",
 		ports[i].port_no, ports[i].duration_sec, ports[i].rx_packets, 
 		ports[i].tx_packets, ports[i].rx_dropped, ports[i].tx_dropped);
 	}
 	fprintf(stderr, "<><><><><><><><><><><><><><><><>\n\n");
+}
+
+void save_connected_ports(struct of_switch *s){
+	struct ofp_multipart_reply *m = (struct ofp_multipart_reply *)s->read_buffer;
+	//move to the part with ports
+	int num_ports = (ntohs(m->header.length) - sizeof(struct ofp_multipart_reply)) / sizeof(struct ofp_port); // get num of ports included
+	struct ofp_port *port = (struct ofp_port *)(++m);
+	int i = 0;
+	for(i = 0; i < num_ports; i++){
+		memcpy(&s->connected_ports[i], &port[i], sizeof(struct ofp_port));
+		fprintf(stderr, "Port name: %s\n", s->connected_ports[i].name);
+	}
+	
 }
 
 void handle_multipart_reply(struct of_switch *loaded_switch){
@@ -366,6 +387,10 @@ void handle_multipart_reply(struct of_switch *loaded_switch){
 			print_port_stats((struct ofp_port_stats *)&multi->body[0], ntohs(multi->header.length));
 			break;
 
+		case OFPMP_PORT_DESC :
+			fprintf(stderr, "port decriptions to follow:\n");
+			save_connected_ports(loaded_switch);
+			break;
 		default :
 			//fprintf(stderr, "Multipart Message not supported yet!\n");
 			break;
