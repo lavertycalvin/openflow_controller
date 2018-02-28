@@ -1,5 +1,4 @@
 /* Controller.c
- * :
  * Author: Calvin Laverty
  * Last Edit: 2/8/18
  */
@@ -322,7 +321,7 @@ void handle_write_socket(struct of_switch *listening_switch){
 		listening_switch->ports_requested = 1;
 	}
 	else if(!listening_switch->default_flow_set){
-		write_flow_mod(listening_switch, DEFAULT_FLOW);
+		write_flow_mod(listening_switch, DEFAULT_FLOW, NULL);
 		listening_switch->default_flow_set = 1;
 	}
 	else{

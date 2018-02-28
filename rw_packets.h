@@ -47,5 +47,5 @@ void get_port_info(struct of_switch *unk_switch);
 
 void read_port_change(struct of_switch *uneasy_switch);
 
-void write_flow_mod(struct of_switch *mod_sw, int reason);
+void write_flow_mod(struct of_switch *mod_sw, int reason, struct node *connection);
 #endif

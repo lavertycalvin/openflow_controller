@@ -7,6 +7,9 @@
 #include "flows.h"
 #include "string.h"
 
+char *probe_packet_ether_addr = "33:33:33:33:33:33"; //current hack to check switch to switch links
+
+
 void resize_buffer(struct of_switch *full_switch, int buffer){
 	//fprintf(stderr, "\n"
 	//		"========================================\n"
@@ -287,6 +290,7 @@ void get_port_info(struct of_switch *unk_switch){
 
 void flood_packet(struct of_switch *s, uint32_t buffer_id){
 	//send packet out
+	//fprintf(stderr, "Flooding packet!\n");
 	struct ofp_packet_out *out = (struct ofp_packet_out *)s->write_buffer;
 	out->header.type    = OFPT_PACKET_OUT;
 	out->header.length  = htons(sizeof(struct ofp_packet_out) + sizeof(struct ofp_action_output));
@@ -302,13 +306,14 @@ void flood_packet(struct of_switch *s, uint32_t buffer_id){
 	struct ofp_action_output *action = (struct ofp_action_output *)out->actions;
 	action->type    = htons(OFPAT_OUTPUT);
 	action->len     = htons(sizeof(struct ofp_action_output)); 
-	action->max_len = htons(OFPCML_NO_BUFFER);
+	action->max_len = htons(64000); // set default size to 64k
 	action->port    = htonl(OFPP_FLOOD); //flood the packet
 
 	//now we add on the probe packet
 	s->rw = WRITE;
 	s->of_status = OFPT_PACKET_OUT;
 	s->bytes_expected = ntohs(out->header.length);
+	s->bytes_read     = 0;
 }
 
 
@@ -325,7 +330,6 @@ void send_probe_packet(struct of_switch *new_s){
 	out->header.xid     = htonl(new_s->xid++);
 	out->header.version = OFP_VERSION;
 	
-
 	out->buffer_id   = htonl(new_s->xid++); //lol use this twice
 	out->in_port     = htonl(OFPP_CONTROLLER);
         out->actions_len = htons(sizeof(struct ofp_action_output));
@@ -338,6 +342,9 @@ void send_probe_packet(struct of_switch *new_s){
 	action->port    = htonl(OFPP_FLOOD);
 
 	//now we add on the probe packet
+		
+	
+	//and direct to send
 	new_s->rw = WRITE;
 	new_s->of_status = OFPT_PACKET_OUT;
 	new_s->bytes_expected = ntohs(out->header.length);
@@ -391,6 +398,7 @@ void write_default_miss(struct of_switch *needs_help){
 void write_new_flow(struct of_switch *learning){
 	fprintf(stderr, "NEEDS A NEW FLOW BRO!\n");
 	struct ofp_flow_mod *mod = (struct ofp_flow_mod *)learning->write_buffer;
+	struct ofp_packet_in *in = (struct ofp_packet_in *)learning->read_buffer;
 	mod->header.type    = OFPT_FLOW_MOD;
 	mod->header.version = OFP_VERSION;
 	mod->header.length  = htons(sizeof(struct ofp_flow_mod) + sizeof(struct ofp_instruction_actions) + sizeof(struct ofp_action_output));	
@@ -403,16 +411,20 @@ void write_new_flow(struct of_switch *learning){
 	mod->idle_timeout = htons(0); // never time out
 	mod->hard_timeout = htons(0); // never time out
 	mod->priority     = htons(1); // just above default miss
-	mod->buffer_id    = htonl(OFP_NO_BUFFER); //not applied to buffered packet
+	mod->buffer_id    = in->buffer_id; //apply to buffered packet thart triggered new mod
 
 	mod->out_port     = 0;
 	mod->out_group    = 0;
 	mod->flags        = htons(OFPFF_SEND_FLOW_REM | OFPFF_CHECK_OVERLAP | OFPFF_RESET_COUNTS); //check overlap should be the only one necessary
 	mod->match.type   = htons(OFPMT_OXM);
-	mod->match.length = htons(4); //2 for type, 2 for length (but instruction comes 8 bytes after start)
+	mod->match.length = htons(32); //4 for type, 4 for length, 4 for port, 6 for dst, 6 for src
 
+	//now add all the oxm fields
+	uint8_t *oxm_field  = mod->match.oxm_fields;
+	oxm_field = 
+	
 	//now add the isntruction to the end of the 
-	struct ofp_instruction_actions *instr = (struct ofp_instruction_actions *)&learning->write_buffer[sizeof(struct ofp_flow_mod)];
+	struct ofp_instruction_actions *instr = (struct ofp_instruction_actions *)&learning->write_buffer[sizeof(struct ofp_flow_mod) + ntohs(mod->match.length)];
 	instr->type = htons(OFPIT_APPLY_ACTIONS);
 	instr->len  = htons(sizeof(struct ofp_instruction_actions) + sizeof(struct ofp_action_output));
 
@@ -420,15 +432,15 @@ void write_new_flow(struct of_switch *learning){
 	struct ofp_action_output *action = (struct ofp_action_output *)instr->actions;
 	action->len  = htons(sizeof(struct ofp_action_output));
 	action->type = htons(OFPAT_OUTPUT);
-	action->port = htonl(OFPP_CONTROLLER);
-	action->max_len = htons(OFPCML_NO_BUFFER);	
+	action->port = htonl(OFPP_CONTROLLER); //this is wrong, must output the dest port
+	action->max_len = htons(6400);	
 	
 	learning->rw = WRITE;
 	learning->of_status = OFPT_MULTIPART_REQUEST;
 	learning->bytes_expected = ntohs(mod->header.length);
 }
 
-void write_flow_mod(struct of_switch *mod_sw, int reason){
+void write_flow_mod(struct of_switch *mod_sw, int reason, struct node *connection){
 	//plan on making a learning switch that matches on the first 
 	if(reason == DEFAULT_FLOW){
 		write_default_miss(mod_sw);
@@ -438,6 +450,7 @@ void write_flow_mod(struct of_switch *mod_sw, int reason){
 	}
 	else if(reason == UNKNOWN){
 		fprintf(stderr, "NOT A CHANCE MAN!\n");
+		exit(1);
 	}
 	else{
 		fprintf(stderr, "If you got here, something went REALLY wrong.\n");
@@ -445,6 +458,11 @@ void write_flow_mod(struct of_switch *mod_sw, int reason){
 	}
 }
 
+
+struct node *check_network(struct of_switch *s){
+	
+	return (struct node *)NULL;
+}
 
 void read_packet_in(struct of_switch *r_switch){
 	struct ofp_packet_in *pkt = (struct ofp_packet_in *)r_switch->read_buffer;
@@ -467,17 +485,25 @@ void read_packet_in(struct of_switch *r_switch){
 	 *******************************************************/
 	if(pkt->reason == OFPR_NO_MATCH){
 		fprintf(stderr, "Packet here because of table miss!\n");
-		flood_packet(r_switch, ntohl(pkt->buffer_id));
+		//if we know what to do, write a flow mod, else flood the packet and save the src
+		struct node *connection = NULL;
+		if((connection = check_network(r_switch)) == NULL){
+			flood_packet(r_switch, ntohl(pkt->buffer_id));
+		}
+		else{
+			write_flow_mod(r_switch, NEW_FLOW, connection);
+		}
 	}
 	
 	//write_flow_mod(r_switch, NEW_FLOW);
 	
-	/* TO DO: Currently when a packet comes in, we read it in, 
-	 * and then do nothing with it! */
-	r_switch->rw = READ;
-	r_switch->bytes_expected = sizeof(struct ofp_header);
-	r_switch->reading_header = 1;
-	r_switch->bytes_read     = 0;
+	//check to see if we need to write something (tbh this should never be set to read when a packet comes in)
+	if(r_switch == READ){
+		r_switch->rw = READ;
+		r_switch->bytes_expected = sizeof(struct ofp_header);
+		r_switch->reading_header = 1;
+		r_switch->bytes_read     = 0;
+	}
 }
 
 /* length is the length of the ENTIRE openflow packet */
