@@ -24,6 +24,11 @@
 struct addrinfo hints, *matches, *server;
 int get_info_ret;
 
+struct node *network_graph;
+int network_size = 50;
+int num_connected_devices = 0;
+
+
 struct of_controller idk_man; 		/* struct to hold all controller info */
 
 char port[15] = "6653"; 		/* common port for Openflow */
@@ -67,7 +72,11 @@ void free_controller_mem(){
 /* when SIGINT is received, this is called to clean up */
 void controller_exit(){
 	free_controller_mem();
+	free(network_graph);
 	interrupt = 1; 
+	fprintf(stderr, "\n=====================================\n"
+			"\n  OPENFLOW CONTROLLER SHUTTING DOWN  \n"
+			"\n=====================================\n");
 }
 
 /* Called when there are more switches that need to be connected to the controller 
@@ -286,8 +295,8 @@ void handle_read_socket(struct of_switch *talking_switch){
 			break;
 		
 		default:
-			/* assume it is an error at first */
-			fprintf(stderr, "This is an error!\n");
+			/* assume it is an error */
+			fprintf(stderr, "This is an perror!\n");
 			break;
 	}
 }
@@ -374,6 +383,12 @@ void select_loop(){
 	}
 }
 
+/* Initialize network graph via an adjacency list */
+void initialize_network_graph(){
+	network_graph = malloc(sizeof(struct node) * network_size);
+	network_graph->next = NULL;
+}
+
 /* Initializes all required memory and stats for the controller */
 void initialize_controller(){
 	idk_man.max_connected_switches = 100;
@@ -458,6 +473,9 @@ int main(int argc, char **argv){
 
 	fflush(stdout);
 
+	/* setup network struct */
+	initialize_network_graph();
+	
 	/* setup the controller struct */
 	initialize_controller();
 

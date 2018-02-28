@@ -3,11 +3,28 @@
 
 #include "openflow.h"
 #include <stdint.h>
+#include <netinet/ether.h>
+#include <netinet/in.h>
+
 
 enum rw_status{
 	READ,
 	WRITE,
 	DISCONNECTED
+};
+
+
+/*****************************************
+ *
+ * Save and adjacency matrix of the connected network
+ *
+ *****************************************/
+struct node{
+	struct ether_addr hw_addr;
+	struct in_addr    ip_addr; 
+	struct node *next;
+	uint8_t is_switch;
+	uint8_t device_num; //used to index into the adj matrix
 };
 
 
@@ -17,6 +34,8 @@ struct of_controller{
 	struct of_switch *switch_list;   /* list of all connected switches */
 };
 
+
+//chandler wrote all of this part
 struct of_switch{
 	enum rw_status  	rw;
 	enum ofp_type 		of_status;
@@ -36,6 +55,7 @@ struct of_switch{
 	uint8_t 		default_flow_set;
 	uint8_t 		timeout; //in seconds
 	struct ofp_port 	connected_ports[50]; //right now assume 50 max ports
+	struct ether_addr	connected_hosts[50]; //one hw addr for each port
 };
 
 
