@@ -399,10 +399,6 @@ void write_new_flow(struct of_switch *learning){
 	fprintf(stderr, "NEEDS A NEW FLOW BRO!\n");
 	struct ofp_flow_mod *mod = (struct ofp_flow_mod *)learning->write_buffer;
 	struct ofp_packet_in *in = (struct ofp_packet_in *)learning->read_buffer;
-	mod->header.type    = OFPT_FLOW_MOD;
-	mod->header.version = OFP_VERSION;
-	mod->header.length  = htons(sizeof(struct ofp_flow_mod) + sizeof(struct ofp_instruction_actions) + sizeof(struct ofp_action_output));	
-	mod->header.xid     = htonl(learning->xid++);
 
 	mod->table_id     = 0; 
 	mod->cookie       = 0;
@@ -420,8 +416,13 @@ void write_new_flow(struct of_switch *learning){
 	mod->match.length = htons(32); //4 for type, 4 for length, 4 for port, 6 for dst, 6 for src
 
 	//now add all the oxm fields
-	uint8_t *oxm_field  = mod->match.oxm_fields;
-	oxm_field = 
+	uint8_t *oxm_field  = (uint8_t *)mod->match.oxm_fields;
+	//port
+	uint32_t *oxm_port = (uint32_t *)oxm_field;
+	oxm_port[0] = OXM_OF_IN_PORT;
+	//dst
+	
+	//src
 	
 	//now add the isntruction to the end of the 
 	struct ofp_instruction_actions *instr = (struct ofp_instruction_actions *)&learning->write_buffer[sizeof(struct ofp_flow_mod) + ntohs(mod->match.length)];
@@ -434,6 +435,12 @@ void write_new_flow(struct of_switch *learning){
 	action->type = htons(OFPAT_OUTPUT);
 	action->port = htonl(OFPP_CONTROLLER); //this is wrong, must output the dest port
 	action->max_len = htons(6400);	
+	
+	//set top level header last because of length reasons
+	mod->header.type    = OFPT_FLOW_MOD;
+	mod->header.version = OFP_VERSION;
+	mod->header.length  = htons(sizeof(struct ofp_flow_mod) + sizeof(struct ofp_instruction_actions) + sizeof(struct ofp_action_output) + ntohs(mod->match.length));	
+	mod->header.xid     = htonl(learning->xid++);
 	
 	learning->rw = WRITE;
 	learning->of_status = OFPT_MULTIPART_REQUEST;
@@ -489,6 +496,7 @@ void read_packet_in(struct of_switch *r_switch){
 		struct node *connection = NULL;
 		if((connection = check_network(r_switch)) == NULL){
 			flood_packet(r_switch, ntohl(pkt->buffer_id));
+			//save the src here
 		}
 		else{
 			write_flow_mod(r_switch, NEW_FLOW, connection);
