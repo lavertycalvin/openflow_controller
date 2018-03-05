@@ -19,6 +19,12 @@ enum rw_status{
  * Save and adjacency matrix of the connected network
  *
  *****************************************/
+struct network{
+	struct node **devices;
+	uint8_t num_conn_devices;
+	uint8_t max_network_size;
+};
+
 struct node{
 	struct ether_addr hw_addr;
 	struct in_addr    ip_addr; 

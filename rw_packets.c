@@ -162,7 +162,7 @@ void read_openflow_hello(struct of_switch *reading_switch){
 		/* TO DO: close the connection.... */
 	}
 	else{
-		fprintf(stderr, "Compatible Switch running Openflow v1.3\n");
+		//fprintf(stderr, "Compatible Switch running Openflow v1.3\n");
 	}
 	reading_switch->rw = READ;
 	reading_switch->bytes_expected = sizeof(struct ofp_header);
@@ -533,13 +533,11 @@ void read_packet_in(struct of_switch *r_switch){
 	//write_flow_mod(r_switch, NEW_FLOW);
 	
 	//check to see if we need to write something (tbh this should never be set to read when a packet comes in)
-	if(r_switch == READ){
-		fprintf(stderr, "Reset to read next packet\n");
-		r_switch->rw = READ;
-		r_switch->bytes_expected = sizeof(struct ofp_header);
-		r_switch->reading_header = 1;
-		r_switch->bytes_read     = 0;
-	}
+	fprintf(stderr, "Reset to read next packet\n");
+	r_switch->rw = READ;
+	r_switch->bytes_expected = sizeof(struct ofp_header);
+	r_switch->reading_header = 1;
+	r_switch->bytes_read     = 0;
 }
 
 /* length is the length of the ENTIRE openflow packet */

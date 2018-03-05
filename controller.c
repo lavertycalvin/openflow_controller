@@ -16,17 +16,14 @@
 #include "openflow.h"
 #include "rw_packets.h"
 #include "controller.h"
-#include "smartalloc.h"
+//#include "smartalloc.h"
 
 
 /* GLOBAL DEFS */
 struct addrinfo hints, *matches, *server;
 int get_info_ret;
 
-struct node *network_graph;
-int network_size = 50;
-int num_connected_devices = 0;
-
+struct network *network_graph;
 
 struct of_controller idk_man; 		/* struct to hold all controller info */
 
@@ -45,16 +42,43 @@ fd_set write_sockets;
 fd_set error_sockets;
 /* END GLOBAL DEFS */
 
+
+/* print out the network connections */
+void print_network(struct network *graph){
+	fprintf(stderr, "^^^^^^^^^^^^^^^^^^^^^^^^^\n"
+			"^^^^ NETWORK GRAPH ^^^^^^\n"
+			"^^^^^^^^^^^^^^^^^^^^^^^^^\n\n");
+	
+	int i = 0;
+	for(; i < graph->max_network_size; i++){
+		if(graph->devices[i] != NULL){
+			if(graph->devices[i]->is_switch){
+				fprintf(stderr, "Switch %d: ", graph->devices[i]->device_num);
+			}
+			else{
+				fprintf(stderr, "Device %d: ", graph->devices[i]->device_num);
+			}
+			struct node *connection = graph->devices[i]->next;
+			while(connection != NULL){
+				fprintf(stderr, "%d, ", connection->device_num);
+			}
+			fprintf(stderr, "END\n");
+		}	
+	}	
+	fprintf(stderr, "\n^^^^^^^^^^^^^^^^^^^^^^^^^\n");
+}
+
+
 /* Free all buffers for connected and used switches */
 void free_switch_buffers(struct of_switch *switches){
 	int i = 0;
 	for(; i < idk_man.num_connected_switches; i++){
 		if(switches->rw != DISCONNECTED){
 			if(switches->read_buffer != NULL){
-				free(switches->read_buffer);
+				//free(switches->read_buffer);
 			}
 			if(switches->write_buffer != NULL){
-				free(switches->write_buffer);
+				//free(switches->write_buffer);
 			}
 		}
 	}	
@@ -64,14 +88,31 @@ void free_switch_buffers(struct of_switch *switches){
 void free_controller_mem(){
 	free_switch_buffers(idk_man.switch_list);
 	if(idk_man.switch_list != NULL){
-		free(idk_man.switch_list);
+		//free(idk_man.switch_list);
 	}
+}
+
+void free_network_graph(struct network *graph){
+	int i = 0;
+	for(; i < graph->max_network_size; i++){
+		if(graph->devices[i] != NULL){
+			struct node *curr = graph->devices[i];
+			struct node *next_node = NULL;
+			while(curr != NULL){
+				next_node = curr->next;
+				free(curr);
+				curr = next_node;	
+			}
+		}
+	}
+	//free(graph->devices);
+	//free(graph);
 }
 
 /* when SIGINT is received, this is called to clean up */
 void controller_exit(){
 	free_controller_mem();
-	free(network_graph);
+	free_network_graph(network_graph);
 	interrupt = 1; 
 	fprintf(stderr, "\n=====================================\n"
 			"\n  OPENFLOW CONTROLLER SHUTTING DOWN  \n"
@@ -154,6 +195,18 @@ void setup_new_switch(int fd){
 	if(fd > largest_fd){
 		largest_fd = fd;
 	}
+
+	//add the switch to the network graph!
+	int i = 0;
+	while(network_graph->devices[i] != NULL){
+		i++;
+	}
+	
+	network_graph->devices[i]  = calloc(1, sizeof(struct node));
+	network_graph->devices[i]->device_num = network_graph->num_conn_devices++;
+	network_graph->devices[i]->is_switch = 1;
+	network_graph->devices[i]->next = NULL;
+	print_network(network_graph);
 }
 
 /* Handles a new connection to a switch */
@@ -269,14 +322,13 @@ void handle_read_socket(struct of_switch *talking_switch){
 		case OFPT_HELLO :
 			//fprintf(stderr, "We are reading an OFPT_HELLO!\n");
 			read_openflow_hello(talking_switch);	
-			write_flow_mod(talking_switch, DEFAULT_FLOW, NULL);
 			/* after reading hello, send our features request */
 			//write_openflow_hello(talking_switch);
 			break;
 	
 		case OFPT_FEATURES_REPLY :
 			read_features(talking_switch);
-			send_probe_packet(talking_switch);
+			//send_probe_packet(talking_switch);
 			/* set config for the switch */
 			break;	
 		
@@ -323,6 +375,7 @@ void handle_write_socket(struct of_switch *listening_switch){
 		listening_switch->ports_requested = 1;
 	}
 	else if(!listening_switch->default_flow_set){
+		write_flow_mod(listening_switch, DEFAULT_FLOW, NULL);
 		listening_switch->default_flow_set = 1;
 	}
 	else{
@@ -385,16 +438,16 @@ void select_loop(){
 
 /* Initialize network graph via an adjacency list */
 void initialize_network_graph(){
-	network_graph = malloc(sizeof(struct node) * network_size);
-	network_graph->next = NULL;
+	network_graph = calloc(1, sizeof(struct network));
+	network_graph->max_network_size = 50;
+	network_graph->num_conn_devices = 0;
+	network_graph->devices = calloc(network_graph->max_network_size, sizeof(struct node *));
 }
 
 /* Initializes all required memory and stats for the controller */
 void initialize_controller(){
-	idk_man.max_connected_switches = 100;
+	idk_man.max_connected_switches = 50;
 	idk_man.switch_list = calloc(idk_man.max_connected_switches, sizeof(struct of_switch));
-	
-	//initialize all to disconnected state
 }
 
 /* returns port in host order */
