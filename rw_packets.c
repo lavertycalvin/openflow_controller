@@ -7,8 +7,7 @@
 #include "flows.h"
 #include "string.h"
 
-char *probe_packet_ether_addr = "33:33:33:33:33:33"; //current hack to check switch to switch links
-
+struct ether_addr probe_packet_ether_addr = {{33,33,33,33,33,33}}; //current hack to check switch to switch links
 
 void resize_buffer(struct of_switch *full_switch, int buffer){
 	//fprintf(stderr, "\n"
@@ -309,6 +308,8 @@ void flood_packet(struct of_switch *s, uint32_t buffer_id){
 	action->max_len = htons(64000); // set default size to 64k
 	action->port    = htonl(OFPP_FLOOD); //flood the packet
 
+	
+
 	//now we add on the probe packet
 	s->rw = WRITE;
 	s->of_status = OFPT_PACKET_OUT;
@@ -321,27 +322,37 @@ void flood_packet(struct of_switch *s, uint32_t buffer_id){
  * When a new switch is connected, send out a packet to each
  * connected port that is active to check if any connections
  * are switch-switch links
+ * When the controller floods the packet, the data
+ * included in the packet is the pointer of the switch that is flooding
+ *
  ***************************************/
 void send_probe_packet(struct of_switch *new_s){
 	//send packet out
+	fprintf(stderr, "Sending out probe packet from switch %d\n", new_s->socket_fd);
 	struct ofp_packet_out *out = (struct ofp_packet_out *)new_s->write_buffer;
 	out->header.type    = OFPT_PACKET_OUT;
-	out->header.length  = htons(sizeof(struct ofp_packet_out) + sizeof(struct ofp_action_output) + 0);//NOT RIGHT
+	out->header.length  = htons(sizeof(struct ofp_packet_out) + sizeof(struct ofp_action_output) + sizeof(struct ether_addr));//NOT RIGHT
 	out->header.xid     = htonl(new_s->xid++);
 	out->header.version = OFP_VERSION;
 	
-	out->buffer_id   = htonl(new_s->xid++); //lol use this twice
+	out->buffer_id   = htonl(OFP_NO_BUFFER);
 	out->in_port     = htonl(OFPP_CONTROLLER);
         out->actions_len = htons(sizeof(struct ofp_action_output));
 	
 	//set the packet to flood
 	struct ofp_action_output *action = (struct ofp_action_output *)out->actions;
 	action->type    = htons(OFPAT_OUTPUT);
-	action->len     = htons(sizeof(struct ofp_action_output)); //wrong
+	action->len     = htons(sizeof(struct ofp_action_output));
 	action->max_len = htons(OFPCML_NO_BUFFER);
 	action->port    = htonl(OFPP_FLOOD);
 
 	//now we add on the probe packet
+	//add on the "special" probe data (33:33:33:33:33:33)
+	char *data = (char *)&new_s->write_buffer[ntohs(out->header.length) - sizeof(struct ether_addr)];
+	int i = 0;
+	for(; i < 6; i++){
+		data[i] = probe_packet_ether_addr.ether_addr_octet[i];
+	}
 		
 	
 	//and direct to send
@@ -466,6 +477,19 @@ void write_flow_mod(struct of_switch *mod_sw, int reason, struct node *connectio
 }
 
 
+int is_switch_connection(uint8_t *data){
+	int i = 0;
+	for(; i < 6; i++){
+		if(data[i] != probe_packet_ether_addr.ether_addr_octet[i]){
+			fprintf(stderr, "Not a switch connection\n");
+			return 0;
+		}
+	}
+	fprintf(stderr, "SWITCH TO SWITCH CONNECTION!!!!\n");
+	exit(1);
+	return 1;
+}
+
 struct node *check_network(struct of_switch *s){
 	
 	return (struct node *)NULL;
@@ -494,8 +518,11 @@ void read_packet_in(struct of_switch *r_switch){
 		fprintf(stderr, "Packet here because of table miss!\n");
 		//if we know what to do, write a flow mod, else flood the packet and save the src
 		struct node *connection = NULL;
-		if((connection = check_network(r_switch)) == NULL){
-			flood_packet(r_switch, ntohl(pkt->buffer_id));
+		if(is_switch_connection((uint8_t *)&r_switch->read_buffer[ntohs(pkt->total_len) - 6])){
+			//do nothing, drop the packet and add switch connection to network
+		}
+		else if((connection = check_network(r_switch)) == NULL){
+			//flood_packet(r_switch, ntohl(pkt->buffer_id));
 			//save the src here
 		}
 		else{
@@ -507,6 +534,7 @@ void read_packet_in(struct of_switch *r_switch){
 	
 	//check to see if we need to write something (tbh this should never be set to read when a packet comes in)
 	if(r_switch == READ){
+		fprintf(stderr, "Reset to read next packet\n");
 		r_switch->rw = READ;
 		r_switch->bytes_expected = sizeof(struct ofp_header);
 		r_switch->reading_header = 1;

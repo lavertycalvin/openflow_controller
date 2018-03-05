@@ -269,12 +269,14 @@ void handle_read_socket(struct of_switch *talking_switch){
 		case OFPT_HELLO :
 			//fprintf(stderr, "We are reading an OFPT_HELLO!\n");
 			read_openflow_hello(talking_switch);	
+			write_flow_mod(talking_switch, DEFAULT_FLOW, NULL);
 			/* after reading hello, send our features request */
 			//write_openflow_hello(talking_switch);
 			break;
 	
 		case OFPT_FEATURES_REPLY :
 			read_features(talking_switch);
+			send_probe_packet(talking_switch);
 			/* set config for the switch */
 			break;	
 		
@@ -321,7 +323,6 @@ void handle_write_socket(struct of_switch *listening_switch){
 		listening_switch->ports_requested = 1;
 	}
 	else if(!listening_switch->default_flow_set){
-		write_flow_mod(listening_switch, DEFAULT_FLOW, NULL);
 		listening_switch->default_flow_set = 1;
 	}
 	else{
