@@ -16,7 +16,7 @@
 #include "openflow.h"
 #include "rw_packets.h"
 #include "controller.h"
-//#include "smartalloc.h"
+#include "smartalloc.h"
 
 
 /* GLOBAL DEFS */
@@ -68,6 +68,20 @@ void print_network(struct network *graph){
 	fprintf(stderr, "\n^^^^^^^^^^^^^^^^^^^^^^^^^\n");
 }
 
+void add_connection(uint8_t dest, uint8_t src, uint32_t dst_port, uint32_t src_port){
+	int i = 0;
+	for(; i < network_graph->max_network_size; i++){
+		if(network_graph->devices[i] != NULL){
+			if(network_graph->devices[i]->device_num == dest){
+			
+			}
+			else if(network_graph->devices[i]->device_num == src){
+			
+			}
+		}	
+		
+	}	
+}
 
 /* Free all buffers for connected and used switches */
 void free_switch_buffers(struct of_switch *switches){
@@ -325,7 +339,7 @@ void handle_read_socket(struct of_switch *talking_switch){
 	
 		case OFPT_FEATURES_REPLY :
 			read_features(talking_switch);
-			//send_probe_packet(talking_switch);
+			send_probe_packet(talking_switch);
 			/* set config for the switch */
 			break;	
 		
@@ -344,10 +358,23 @@ void handle_read_socket(struct of_switch *talking_switch){
 			read_port_change(talking_switch);
 			break;
 		
+		case OFPT_FLOW_REMOVED :
+			fprintf(stderr, "Flow timed out!\n");
+			break;
+
 		default:
 			/* assume it is an error */
-			fprintf(stderr, "This is an perror!\n");
+			fprintf(stderr, "This is an OFPT_ERROR! Closing connection!\n");
+			close(talking_switch->socket_fd);
+			talking_switch->rw = DISCONNECTED;
 			break;
+	}
+	//if we are not planning on writing anything, reset to read
+	if(talking_switch->rw != WRITE){
+		talking_switch->bytes_expected = sizeof(struct ofp_header);
+		talking_switch->reading_header = 1;
+		talking_switch->bytes_read     = 0;
+		memset(talking_switch->read_buffer, 0, talking_switch->read_buffer_size);
 	}
 }
 
@@ -358,6 +385,8 @@ void handle_write_socket(struct of_switch *listening_switch){
 			return;
 		}
 	}
+	listening_switch->bytes_written = 0;
+	memset(listening_switch->write_buffer, 0, listening_switch->write_buffer_size);
 
 	if(!listening_switch->features_requested){
 		request_features(listening_switch);
@@ -372,15 +401,17 @@ void handle_write_socket(struct of_switch *listening_switch){
 		listening_switch->ports_requested = 1;
 	}
 	else if(!listening_switch->default_flow_set){
-		write_flow_mod(listening_switch, DEFAULT_FLOW, NULL);
+		write_flow_mod(listening_switch, DEFAULT_FLOW, NULL, 0, 0);
 		listening_switch->default_flow_set = 1;
 	}
 	else{
+		//fprintf(stderr, "Reset to read next packet\n");
 		listening_switch->rw = READ;
 		listening_switch->bytes_expected = sizeof(struct ofp_header);
 		listening_switch->reading_header = 1;
+		listening_switch->bytes_read     = 0;
+		listening_switch->bytes_written = 0;
 	}
-	listening_switch->bytes_written = 0;
 }
 
 /* loop through all connected switches and split into read and write states */

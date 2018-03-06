@@ -31,6 +31,7 @@ struct node{
 	struct node *next;
 	uint8_t is_switch;
 	uint8_t device_num; //used to index into the adj matrix
+	uint8_t port_num;
 };
 
 
@@ -47,7 +48,7 @@ struct of_switch{
 	enum ofp_type 		of_status;
 	uint8_t			reading_header;
 	uint32_t 		xid;
-	uint32_t 		socket_fd;
+	uint16_t 		socket_fd;
 	uint16_t 		bytes_read;
 	uint16_t 		bytes_written;
 	uint16_t 		bytes_expected;

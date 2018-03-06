@@ -1,4 +1,5 @@
 /* Handles input and output of openflow packets */
+
 #include "rw_packets.h"
 #include "controller.h"
 #include <netinet/in.h>
@@ -6,8 +7,17 @@
 #include "openflow.h"
 #include "flows.h"
 #include "string.h"
+#include <unistd.h>
 
 struct ether_addr probe_packet_ether_addr = {{33,33,33,33,33,33}}; //current hack to check switch to switch links
+
+struct probe_packet probe = { .e = {.dest = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+				    .source = {0x01, 0x01, 0x01, 0x01, 0x01, 0x01},
+				    .type = 0},
+			    };
+
+
+
 
 void resize_buffer(struct of_switch *full_switch, int buffer){
 	//fprintf(stderr, "\n"
@@ -159,15 +169,13 @@ void read_openflow_hello(struct of_switch *reading_switch){
 	//reading_switch->xid = ntohl(ofp_hdr->header.xid);
 	if(ofp_hdr->header.version != OFP_VERSION){
 		fprintf(stderr, "Switch not using version 1.3! Closing connection!\n");
+		
 		/* TO DO: close the connection.... */
+		close(reading_switch->socket_fd);
 	}
 	else{
 		//fprintf(stderr, "Compatible Switch running Openflow v1.3\n");
 	}
-	reading_switch->rw = READ;
-	reading_switch->bytes_expected = sizeof(struct ofp_header);
-	reading_switch->reading_header = 1;
-	reading_switch->bytes_read     = 0;
 }
 
 void write_openflow_hello(struct of_switch *listening_switch){
@@ -307,10 +315,7 @@ void flood_packet(struct of_switch *s, uint32_t buffer_id){
 	action->len     = htons(sizeof(struct ofp_action_output)); 
 	action->max_len = htons(64000); // set default size to 64k
 	action->port    = htonl(OFPP_FLOOD); //flood the packet
-
 	
-
-	//now we add on the probe packet
 	s->rw = WRITE;
 	s->of_status = OFPT_PACKET_OUT;
 	s->bytes_expected = ntohs(out->header.length);
@@ -328,10 +333,10 @@ void flood_packet(struct of_switch *s, uint32_t buffer_id){
  ***************************************/
 void send_probe_packet(struct of_switch *new_s){
 	//send packet out
-	fprintf(stderr, "Sending out probe packet from switch %d\n", new_s->socket_fd);
+	//fprintf(stderr, "Sending out probe packet from switch %d\n", new_s->socket_fd);
 	struct ofp_packet_out *out = (struct ofp_packet_out *)new_s->write_buffer;
 	out->header.type    = OFPT_PACKET_OUT;
-	out->header.length  = htons(sizeof(struct ofp_packet_out) + sizeof(struct ofp_action_output) + sizeof(struct ether_addr));//NOT RIGHT
+	out->header.length  = htons(sizeof(struct ofp_packet_out) + sizeof(struct ofp_action_output) + sizeof(struct probe_packet));
 	out->header.xid     = htonl(new_s->xid++);
 	out->header.version = OFP_VERSION;
 	
@@ -347,13 +352,10 @@ void send_probe_packet(struct of_switch *new_s){
 	action->port    = htonl(OFPP_FLOOD);
 
 	//now we add on the probe packet
-	//add on the "special" probe data (33:33:33:33:33:33)
-	char *data = (char *)&new_s->write_buffer[ntohs(out->header.length) - sizeof(struct ether_addr)];
-	int i = 0;
-	for(; i < 6; i++){
-		data[i] = probe_packet_ether_addr.ether_addr_octet[i];
-	}
-		
+	char *data = (char *)&new_s->write_buffer[ntohs(out->header.length) - sizeof(struct probe_packet)];
+	//fprintf(stderr, "Socket fd is %d\n", new_s->socket_fd);
+	probe.e.type = htons(new_s->socket_fd);
+	memcpy(data, &probe, sizeof(struct probe_packet));	
 	
 	//and direct to send
 	new_s->rw = WRITE;
@@ -361,14 +363,32 @@ void send_probe_packet(struct of_switch *new_s){
 	new_s->bytes_expected = ntohs(out->header.length);
 }
 
-void write_default_miss(struct of_switch *needs_help){
-	struct ofp_flow_mod *mod = (struct ofp_flow_mod *)needs_help->write_buffer;
+/* makes sure that the number passed by lenght of match is a multiple of 16 */
+int round_up(int num){
+	if(num % 8 == 0){
+		return num;
+	}
+	else{
+		num /= 8;
+		num++;
+		return num * 8;
+	}
+
+}
+
+/* handles initial setup of broadcast and default miss rules */
+void write_default_miss(struct of_switch *needs_help, int broadcast_rule){
+	struct ofp_flow_mod *mod = (struct ofp_flow_mod *)&needs_help->write_buffer[needs_help->bytes_expected];
 	mod->header.type    = OFPT_FLOW_MOD;
 	mod->header.version = OFP_VERSION;
-	mod->header.length  = htons(sizeof(struct ofp_flow_mod) + sizeof(struct ofp_instruction_actions) + sizeof(struct ofp_action_output));	
 	mod->header.xid     = htonl(needs_help->xid++);
-
-	mod->table_id     = 0; //apply default miss to first table
+	
+	if(broadcast_rule){
+		mod->table_id = DST_TABLE;
+	}
+	else{
+		mod->table_id = SRC_TABLE; //apply default miss to first table
+	}
 	mod->cookie       = 0;
 	mod->cookie_mask  = 0;
 	mod->command      = OFPFC_ADD;
@@ -381,24 +401,51 @@ void write_default_miss(struct of_switch *needs_help){
 	mod->out_group    = 0;
 	mod->flags        = htons(OFPFF_SEND_FLOW_REM | OFPFF_CHECK_OVERLAP | OFPFF_RESET_COUNTS);
 	mod->match.type   = htons(OFPMT_OXM);
-	mod->match.length = htons(4); //2 for type, 2 for length (but instruction comes 8 bytes after start)
+	
+	struct ofp_instruction_actions *instr;
+	struct ofp_action_output *action;
+	
+	if(broadcast_rule){
+		//now add all the oxm fields for dst (should be matching on ether addr)
+		uint32_t *oxm_fields = (uint32_t *)mod->match.oxm_fields;	
+		oxm_fields[0] = htonl(OXM_OF_ETH_DST);
+		uint8_t *oxm_ether_addr	= (uint8_t *)&oxm_fields[1];
+		int i = 0;
+		for(; i < 6; i++){
+			oxm_ether_addr[i] = 0xff; //set to match on broadcast dest
+		}
+		
+		mod->match.length = htons(14);	//2 length, 2 type, 10 for dst addr
+		instr = (struct ofp_instruction_actions *)&needs_help->write_buffer[needs_help->bytes_expected + sizeof(struct ofp_flow_mod) + round_up(ntohs(mod->match.length)) - sizeof(struct ofp_match)];
+		instr->len = htons(sizeof(struct ofp_instruction_actions) + sizeof(struct ofp_action_output));
+		action = (struct ofp_action_output *)instr->actions;
+		action->port = htonl(OFPP_FLOOD);
+		mod->header.length  = htons(sizeof(struct ofp_instruction_actions) + sizeof(struct ofp_flow_mod) + round_up(ntohs(mod->match.length) - sizeof(struct ofp_match) + sizeof(struct ofp_action_output)));	
+	}
+	else{
+		instr = (struct ofp_instruction_actions *)&needs_help->write_buffer[needs_help->bytes_expected + sizeof(struct ofp_flow_mod)];
+		action = (struct ofp_action_output *)instr->actions;
 
-	//now add the isntruction to the end of the 
-	struct ofp_instruction_actions *instr = (struct ofp_instruction_actions *)&needs_help->write_buffer[sizeof(struct ofp_flow_mod)];
-	instr->type = htons(OFPIT_APPLY_ACTIONS);
-	instr->len  = htons(sizeof(struct ofp_instruction_actions) + sizeof(struct ofp_action_output));
+		mod->match.length = htons(4); //2 for type, 2 for length (but instruction comes 8 bytes after start)
 
-	//now specify the action
-	struct ofp_action_output *action = (struct ofp_action_output *)instr->actions;
+		//now add the isntruction to the end of the match 
+		instr->len  = htons(sizeof(struct ofp_instruction_actions) + sizeof(struct ofp_action_output));
+
+		//now specify the action (forward to controller)
+		action->port = htonl(OFPP_CONTROLLER);
+		mod->header.length  = htons(sizeof(struct ofp_flow_mod) + sizeof(struct ofp_instruction_actions) + sizeof(struct ofp_action_output));	
+	}
 	action->len  = htons(sizeof(struct ofp_action_output));
-	action->type = htons(OFPAT_OUTPUT);
-	action->port = htonl(OFPP_CONTROLLER);
+	action->type = htons(OFPAT_OUTPUT);	
 	action->max_len = htons(OFPCML_NO_BUFFER);	
+	instr->type = htons(OFPIT_APPLY_ACTIONS);
 	
 	needs_help->rw = WRITE;
 	needs_help->of_status = OFPT_FLOW_MOD;
-	needs_help->bytes_expected = ntohs(mod->header.length);
+	needs_help->bytes_expected += ntohs(mod->header.length);
 }
+
+
 
 /************************************************
  * DESIGN IMPLEMENTATION:
@@ -406,65 +453,116 @@ void write_default_miss(struct of_switch *needs_help){
  * 	forwards per ip address to the correct port. 
  * 	This is learned incrementally
  ************************************************/
-void write_new_flow(struct of_switch *learning){
-	fprintf(stderr, "NEEDS A NEW FLOW BRO!\n");
-	struct ofp_flow_mod *mod = (struct ofp_flow_mod *)learning->write_buffer;
+void write_new_flow(struct of_switch *learning, uint8_t table, uint32_t out_port){
+	//fprintf(stderr, "Expecting %d bytes\n", learning->bytes_expected);
+	struct ofp_flow_mod *mod = (struct ofp_flow_mod *)&learning->write_buffer[learning->bytes_expected];
 	struct ofp_packet_in *in = (struct ofp_packet_in *)learning->read_buffer;
 
-	mod->table_id     = 0; 
+	/* get the ethernet address of the incoming packet (src) */
+	struct ether_addr eth;
+	uint8_t *in_data = (uint8_t *)&learning->read_buffer[sizeof(struct ofp_packet_in) + round_up(ntohs(in->match.length))];
+	int j = 0;
+	for(; j < 6; j++){
+		eth.ether_addr_octet[j] = in_data[j];
+	}
+	//fprintf(stderr, "Copied mac address: %02x:%02x:%02x:%02x:%02x:%02x\n", eth.ether_addr_octet[0],
+	//		eth.ether_addr_octet[1], eth.ether_addr_octet[2], eth.ether_addr_octet[3],
+	//		eth.ether_addr_octet[4], eth.ether_addr_octet[5]);
+	mod->header.type    = OFPT_FLOW_MOD;
+	mod->header.version = OFP_VERSION;
+	mod->header.xid     = htonl(learning->xid++);
+
+	mod->table_id     = table; 
 	mod->cookie       = 0;
 	mod->cookie_mask  = 0;
 	mod->command      = OFPFC_ADD;
-	mod->idle_timeout = htons(0); // never time out
-	mod->hard_timeout = htons(0); // never time out
-	mod->priority     = htons(1); // just above default miss
-	mod->buffer_id    = in->buffer_id; //apply to buffered packet thart triggered new mod
+	mod->idle_timeout = htons(60); // time out in a min
+	mod->hard_timeout = htons(60); // time out in a min
+	mod->priority     = htons(1);  // just above default miss
 
-	mod->out_port     = 0;
-	mod->out_group    = 0;
+	if(table == DST_TABLE){
+		mod->out_port = htonl(OFPP_FLOOD);
+		//now add all the oxm fields for dst (should be matching on ether addr)
+		uint32_t *oxm_fields = (uint32_t *)mod->match.oxm_fields;	
+		/* match on ethernet destination */
+		oxm_fields[0] = htonl(OXM_OF_ETH_DST);
+		uint8_t *oxm_ether_addr	= (uint8_t *)&oxm_fields[1];
+		int i = 0;
+		for(; i < 6; i++){
+			oxm_ether_addr[i] = eth.ether_addr_octet[i];
+		}
+		
+		mod->match.length = htons(14); //2 for type, 2 for length, 10 for dst
+		
+		/* now add on the instruction */
+		//fprintf(stderr, "Index of instruction: %lu\n", sizeof(struct ofp_flow_mod) + round_up(ntohs(mod->match.length)));
+		struct ofp_instruction_actions *instr = (struct ofp_instruction_actions *)&learning->write_buffer[learning->bytes_expected + sizeof(struct ofp_flow_mod) + round_up(ntohs(mod->match.length)) - sizeof(struct ofp_match)];
+		instr->type = htons(OFPIT_APPLY_ACTIONS);
+		instr->len  = htons(sizeof(struct ofp_instruction_actions) + sizeof(struct ofp_action_output));
+		
+		//now specify the action (should be to output to this port)
+		struct ofp_action_output *action = (struct ofp_action_output *)instr->actions;
+		action->len  = htons(sizeof(struct ofp_action_output));
+		action->type = htons(OFPAT_OUTPUT);
+		action->port = htonl(out_port);
+		action->max_len = htons(6400);	
+		
+		mod->header.length  = htons(sizeof(struct ofp_flow_mod) + sizeof(struct ofp_instruction_actions) + sizeof(struct ofp_action_output) + round_up(ntohs(mod->match.length)) - sizeof(struct ofp_match));	
+		mod->buffer_id    = htonl(OFP_NO_BUFFER); // no buffer for this rule
+	}
+	else{
+		//now add all the oxm fields for src (should be matching on port and ether_addr)
+		uint32_t *oxm_port = (uint32_t *)mod->match.oxm_fields;	
+		oxm_port[0] = htonl(OXM_OF_IN_PORT); 	//match on input port
+		oxm_port[1] = htonl(out_port);		//add in port
+		oxm_port[2] = htonl(OXM_OF_ETH_SRC);
+		uint8_t *oxm_ether_addr	= (uint8_t *)&oxm_port[3];
+		int i = 0;
+		for(; i < 6; i++){
+			oxm_ether_addr[i] = eth.ether_addr_octet[i];
+		}
+		
+		mod->match.length = htons(22); //2 for type, 2 for length, 8 for port, 10 for either dst or src
+		
+		mod->out_port = htonl(OFPP_FLOOD); //clarify that this is right
+		
+		//we have the src table and we want to instruct to go to the dst table after
+		struct ofp_instruction_goto_table *to_table = (struct ofp_instruction_goto_table *)&learning->write_buffer[sizeof(struct ofp_flow_mod) + round_up(ntohs(mod->match.length)) - sizeof(struct ofp_match)];
+		to_table->type     = htons(OFPIT_GOTO_TABLE);
+		to_table->len      = htons(sizeof(struct ofp_instruction_goto_table));
+		to_table->table_id = DST_TABLE;
+	
+		mod->header.length  = htons(sizeof(struct ofp_flow_mod) + sizeof(struct ofp_instruction_goto_table) + round_up(ntohs(mod->match.length) - sizeof(struct ofp_match)));	
+		mod->buffer_id    = in->buffer_id; //apply to buffered packet that triggered new mod
+	}
+	mod->out_group    = 0; //shouldn't matter for basic implementation
 	mod->flags        = htons(OFPFF_SEND_FLOW_REM | OFPFF_CHECK_OVERLAP | OFPFF_RESET_COUNTS); //check overlap should be the only one necessary
 	mod->match.type   = htons(OFPMT_OXM);
-	mod->match.length = htons(32); //4 for type, 4 for length, 4 for port, 6 for dst, 6 for src
 
-	//now add all the oxm fields
-	uint8_t *oxm_field  = (uint8_t *)mod->match.oxm_fields;
-	//port
-	uint32_t *oxm_port = (uint32_t *)oxm_field;
-	oxm_port[0] = OXM_OF_IN_PORT;
-	//dst
+	/* now add an instruction, this should be one of two things:
+	 * 	SRC_TABLE: the instruction should be goto_table
+	 * 	DST_TABLE: the instruction should try to be matched. If not
+	 * 			this should be flooded out all ports (by
+	 * 			the default match)
+	 */
 	
-	//src
 	
-	//now add the isntruction to the end of the 
-	struct ofp_instruction_actions *instr = (struct ofp_instruction_actions *)&learning->write_buffer[sizeof(struct ofp_flow_mod) + ntohs(mod->match.length)];
-	instr->type = htons(OFPIT_APPLY_ACTIONS);
-	instr->len  = htons(sizeof(struct ofp_instruction_actions) + sizeof(struct ofp_action_output));
-
-	//now specify the action
-	struct ofp_action_output *action = (struct ofp_action_output *)instr->actions;
-	action->len  = htons(sizeof(struct ofp_action_output));
-	action->type = htons(OFPAT_OUTPUT);
-	action->port = htonl(OFPP_CONTROLLER); //this is wrong, must output the dest port
-	action->max_len = htons(6400);	
-	
-	//set top level header last because of length reasons
-	mod->header.type    = OFPT_FLOW_MOD;
-	mod->header.version = OFP_VERSION;
-	mod->header.length  = htons(sizeof(struct ofp_flow_mod) + sizeof(struct ofp_instruction_actions) + sizeof(struct ofp_action_output) + ntohs(mod->match.length));	
-	mod->header.xid     = htonl(learning->xid++);
+	//set top level header last because of different length for source and dest packets
 	
 	learning->rw = WRITE;
-	learning->of_status = OFPT_MULTIPART_REQUEST;
-	learning->bytes_expected = ntohs(mod->header.length);
+	learning->of_status = OFPT_FLOW_MOD;
+	learning->bytes_expected += ntohs(mod->header.length);
 }
 
-void write_flow_mod(struct of_switch *mod_sw, int reason, struct node *connection){
+/* ip match should be the table id -> 0 is src, 1 is dst */ 
+void write_flow_mod(struct of_switch *mod_sw, int reason, struct node *connection, uint8_t ip_match, uint32_t out_port){
 	//plan on making a learning switch that matches on the first 
 	if(reason == DEFAULT_FLOW){
-		write_default_miss(mod_sw);
+		write_default_miss(mod_sw, 0);
+		write_default_miss(mod_sw, 1);
 	}
 	else if(reason == NEW_FLOW){
-		write_new_flow(mod_sw);	
+		write_new_flow(mod_sw, ip_match, out_port);	
 	}
 	else if(reason == UNKNOWN){
 		fprintf(stderr, "NOT A CHANCE MAN!\n");
@@ -476,24 +574,47 @@ void write_flow_mod(struct of_switch *mod_sw, int reason, struct node *connectio
 	}
 }
 
-
+/* returns the fd of the sending switch if switch connection,
+ * otherwise returns 0
+ */
 int is_switch_connection(uint8_t *data){
-	int i = 0;
-	for(; i < 6; i++){
-		if(data[i] != probe_packet_ether_addr.ether_addr_octet[i]){
-			fprintf(stderr, "Not a switch connection\n");
-			return 0;
-		}
+	struct probe_packet *probe  = (struct probe_packet *)data;
+	if(probe->e.type < 100){
+		uint16_t switch_fd = ntohs(probe->e.type);
+		fprintf(stderr, "Type of incoming packet: %d\n", switch_fd);		
+		fprintf(stderr, "switch to switch connection!\n");
+		return switch_fd;	
 	}
-	fprintf(stderr, "SWITCH TO SWITCH CONNECTION!!!!\n");
-	exit(1);
-	return 1;
+	return 0;
 }
 
 struct node *check_network(struct of_switch *s){
-	
+		
 	return (struct node *)NULL;
 }
+
+uint32_t get_input_port(struct ofp_match *match){
+	uint32_t port = 0;
+	uint8_t i = 0;
+	while(i < ntohs(match->length)){
+		if(OXM_TYPE(match->oxm_fields[i]) == OFPXMT_OFB_IN_PORT){
+			i += 4; //offset 2 for field and length bytes
+			//fprintf(stderr, "FOUND THE OXM PORT FIELD! NOICE\n");
+			port = ntohl(match->oxm_fields[i] | (match->oxm_fields[i + 1] << 8) |
+				     (match->oxm_fields[i + 2] << 16) | (match->oxm_fields[i + 3] << 24)); //do some shifting magic
+			break;
+		}
+		else{
+			fprintf(stderr, "Length is %d\n", OXM_LENGTH(match->oxm_fields[i]));
+			exit(1);
+			i += match->oxm_fields[i + 1]; //get the length and add that to i to get to next field
+		}
+	}
+
+	fprintf(stderr, "Port is: %d\n", port);
+	return port;
+}
+
 
 void read_packet_in(struct of_switch *r_switch){
 	struct ofp_packet_in *pkt = (struct ofp_packet_in *)r_switch->read_buffer;
@@ -508,36 +629,29 @@ void read_packet_in(struct of_switch *r_switch){
 			"\n=================\n\n",
 			r_switch->socket_fd, ntohl(pkt->buffer_id), ntohs(pkt->total_len),
 			pkt->reason, pkt->table_id);
-	
+	/* get the port that the packet came in on to the switch */
+	struct ofp_match *match = &pkt->match;
+	//search for the input port
+	uint32_t input_port = get_input_port(match);
+
 	/******************************************************
 	 * check to see if we know what to do with the packet
 	 * if we do: write a flow mod
 	 * if not, flood the packet out of the rest of the ports
 	 *******************************************************/
 	if(pkt->reason == OFPR_NO_MATCH){
-		fprintf(stderr, "Packet here because of table miss!\n");
+		//fprintf(stderr, "Packet here because of table miss!\n");
 		//if we know what to do, write a flow mod, else flood the packet and save the src
 		struct node *connection = NULL;
-		if(is_switch_connection((uint8_t *)&r_switch->read_buffer[ntohs(pkt->total_len) - 6])){
+		if(is_switch_connection((uint8_t *)&r_switch->read_buffer[ntohs(pkt->header.length) - ntohs(pkt->total_len)])){
 			//do nothing, drop the packet and add switch connection to network
 		}
-		else if((connection = check_network(r_switch)) == NULL){
-			//flood_packet(r_switch, ntohl(pkt->buffer_id));
-			//save the src here
-		}
 		else{
-			write_flow_mod(r_switch, NEW_FLOW, connection);
+			/* add flow on both input and output tables */
+			write_flow_mod(r_switch, NEW_FLOW, connection, SRC_TABLE, input_port);
+			write_flow_mod(r_switch, NEW_FLOW, connection, DST_TABLE, input_port);
 		}
 	}
-	
-	//write_flow_mod(r_switch, NEW_FLOW);
-	
-	//check to see if we need to write something (tbh this should never be set to read when a packet comes in)
-	fprintf(stderr, "Reset to read next packet\n");
-	r_switch->rw = READ;
-	r_switch->bytes_expected = sizeof(struct ofp_header);
-	r_switch->reading_header = 1;
-	r_switch->bytes_read     = 0;
 }
 
 /* length is the length of the ENTIRE openflow packet */
@@ -570,11 +684,11 @@ void save_connected_ports(struct of_switch *s){
 	int i = 0;
 	for(i = 0; i < num_ports; i++){
 		memcpy(&s->connected_ports[i], &port[i], sizeof(struct ofp_port));
-		fprintf(stderr, "Port number : %u\n"
-				"Port name   : %s\n"
-				"Port HW ADDR: %s\n\n", 
-				ntohl(s->connected_ports[i].port_no), s->connected_ports[i].name, 
-				ether_ntoa((struct ether_addr *)&s->connected_ports[i].hw_addr));
+		//fprintf(stderr, "Port number : %u\n"
+		//		"Port name   : %s\n"
+		//		"Port HW ADDR: %s\n\n", 
+		//		ntohl(s->connected_ports[i].port_no), s->connected_ports[i].name, 
+		//		ether_ntoa((struct ether_addr *)&s->connected_ports[i].hw_addr));
 	}
 	
 }
@@ -589,7 +703,7 @@ void handle_multipart_reply(struct of_switch *loaded_switch){
 			break;
 
 		case OFPMP_PORT_DESC :
-			fprintf(stderr, "port decriptions to follow:\n");
+			//fprintf(stderr, "port decriptions to follow:\n");
 			save_connected_ports(loaded_switch);
 			break;
 		default :

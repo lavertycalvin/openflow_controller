@@ -1,3 +1,4 @@
 mininet*
 openflow-switch*
 controller-*
+*.swp

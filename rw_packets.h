@@ -10,12 +10,32 @@
 #define RESIZE_READ_BUFFER 1
 #define RESIZE_WRITE_BUFFER 2
 
+#define SRC_TABLE 0
+#define DST_TABLE 1
+
 /* reasons to write a flow mod */
 enum{
 	DEFAULT_FLOW,
 	NEW_FLOW,
 	UNKNOWN
 };
+
+#define ARP  0x0806 
+#define IPV4 0x0800
+#define IPV6 0x86dd
+
+
+
+struct enet_header {
+	uint8_t dest[6];
+	uint8_t source[6];
+	uint16_t type; /*ARP, IP, Unknown*/
+}__attribute__((packed));
+
+
+struct probe_packet{
+	struct enet_header e;
+}__attribute__((packed));
 
 /* function defs */
 void write_openflow_hello(struct of_switch *listening_switch);	
@@ -47,6 +67,6 @@ void get_port_info(struct of_switch *unk_switch);
 
 void read_port_change(struct of_switch *uneasy_switch);
 
-void write_flow_mod(struct of_switch *mod_sw, int reason, struct node *connection);
+void write_flow_mod(struct of_switch *mod_sw, int reason, struct node *connection, uint8_t ip_match, uint32_t out_port);
 void send_probe_packet(struct of_switch *new_s);
 #endif
