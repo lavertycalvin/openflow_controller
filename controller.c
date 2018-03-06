@@ -61,6 +61,7 @@ void print_network(struct network *graph){
 			struct node *connection = graph->devices[i]->next;
 			while(connection != NULL){
 				fprintf(stderr, "%d, ", connection->device_num);
+				connection = connection->next;
 			}
 			fprintf(stderr, "END\n");
 		}	
@@ -68,19 +69,114 @@ void print_network(struct network *graph){
 	fprintf(stderr, "\n^^^^^^^^^^^^^^^^^^^^^^^^^\n");
 }
 
+
+int recursive_loop_exists(int find_node, int last_node){
+	int ret = 0;
+	int i = 0;
+	while((network_graph->devices[i] != NULL) && network_graph->devices[i]->device_num != find_node){
+		i++;
+	}
+	if(network_graph->devices[i]->discovered == 0){
+		network_graph->devices[i]->discovered = 1;
+		struct node *next_node = network_graph->devices[i]->next;
+		while((next_node != NULL) && (ret == 0)){
+			if(next_node->device_num != last_node){
+				int j = 0;
+				while((network_graph->devices[j] != NULL) && (network_graph->devices[j]->device_num != next_node->device_num)){
+					j++;
+				}
+				if(network_graph->devices[j]->discovered){
+					//we found a connection that is already discovered and was not directly connected
+					fprintf(stderr, "FOUND A CYCLE (%d was already discovered)!\n", last_node);
+					ret = network_graph->devices[j]->device_num;
+					return ret;
+				}
+				ret = recursive_loop_exists(next_node->device_num, find_node);
+			}
+			next_node = next_node->next;
+		}
+	}
+
+	return ret;
+}
+
+
+/* performs BFS on the network graph in order
+ * to find if there are loops
+ * O(n^2) performance :(
+ */
+int loop_exists(void){
+	int loop = 0;
+	int i = 0;
+	for(; i < network_graph->max_network_size; i++){
+		if(network_graph->devices[i] != NULL){
+			if(network_graph->devices[i]->discovered == 0){
+				network_graph->devices[i]->discovered = 1;
+				if(network_graph->devices[i]->next != NULL){
+					loop = recursive_loop_exists(network_graph->devices[i]->next->device_num, network_graph->devices[i]->device_num);
+				}			
+
+			}
+		}
+				
+	}	
+
+
+	//restore all of the nodes back to being undiscovered for next run
+	i = 0;
+	for(; i < network_graph->max_network_size; i++){
+		if(network_graph->devices[i] != NULL){
+			network_graph->devices[i]->discovered = 0;
+		}
+	}	
+	return loop;
+}
+
 void add_connection(uint8_t dest, uint8_t src, uint32_t dst_port, uint32_t src_port){
 	int i = 0;
 	for(; i < network_graph->max_network_size; i++){
 		if(network_graph->devices[i] != NULL){
-			if(network_graph->devices[i]->device_num == dest){
-			
-			}
-			else if(network_graph->devices[i]->device_num == src){
-			
+			struct node *new;
+			if((network_graph->devices[i]->device_num == dest) || (network_graph->devices[i]->device_num == src)){
+				new = network_graph->devices[i];	
+				int match = new->device_num;
+				int duplicate = 0;
+				while(new->next != NULL){
+					new = new->next;
+					//TO DO: we should check along the way if we already have a connection here
+					if(new->device_num == dest || new->device_num == src){
+						//fprintf(stderr, "DUPLICATE? Match: %d, Device num: %d\n", match, new->device_num);
+						duplicate = 1;
+						break;
+					}
+				}
+				if(duplicate){
+					continue;
+				}
+				new->next = calloc(sizeof(struct node), 1);
+				new = new->next; //move to the newly created node
+				if(match == dest){
+					//save the src
+					new->device_num = src;
+				}
+				else{
+					//save the dest
+					new->device_num = dest;
+					new->port_num = dst_port;
+				}
+				new->next = NULL; //set the next item to be null
+
+
 			}
 		}	
 		
-	}	
+	}
+	//TO DO: After each connection, check to see if we have a loop
+	if(loop_exists()){
+		fprintf(stderr, "Theres a loop!\n");
+		exit(1);
+	}
+	print_network(network_graph);
 }
 
 /* Free all buffers for connected and used switches */
@@ -211,10 +307,13 @@ void setup_new_switch(int fd){
 		i++;
 	}
 	
-	network_graph->devices[i]  = calloc(1, sizeof(struct node));
-	network_graph->devices[i]->device_num = network_graph->num_conn_devices++;
+	network_graph->devices[i] = calloc(1, sizeof(struct node));
+	network_graph->devices[i]->device_num = new_switch->socket_fd; //save as socket fd for now
 	network_graph->devices[i]->is_switch = 1;
 	network_graph->devices[i]->next = NULL;
+	network_graph->devices[i]->discovered = 0;
+	network_graph->num_conn_devices++;
+
 	print_network(network_graph);
 }
 

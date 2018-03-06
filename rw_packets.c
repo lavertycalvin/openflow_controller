@@ -20,12 +20,6 @@ struct probe_packet probe = { .e = {.dest = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 
 
 void resize_buffer(struct of_switch *full_switch, int buffer){
-	//fprintf(stderr, "\n"
-	//		"========================================\n"
-	//		"             RESIZING BUFFER!!!         \n"
-	//		"========================================\n"
-	//		"\n");
-	
 	char *rw_buffer = NULL;
 	if(buffer == RESIZE_READ_BUFFER){
 		full_switch->read_buffer_size *= 2;
@@ -73,7 +67,6 @@ void write_to(struct of_switch *w_switch){
 	}
 	w_switch->bytes_written  += bytes_sent;
 	w_switch->bytes_expected -= bytes_sent;
-	//fprintf(stderr, "Total bytes written to socket fd %d so far: %d\n", w_switch->socket_fd, w_switch->bytes_written);
 }
 
 void read_from(struct of_switch *hi_switch){
@@ -85,7 +78,6 @@ void read_from(struct of_switch *hi_switch){
 		bytes_available = hi_switch->read_buffer_size - hi_switch->bytes_read;
 	}
 	
-	//fprintf(stderr, "Expecting %d more bytes\n", hi_switch->bytes_expected);
 	bytes_received = recv(hi_switch->socket_fd, hi_switch->read_buffer + hi_switch->bytes_read, 
 			      hi_switch->bytes_expected, MSG_DONTWAIT); 
 	if(bytes_received < 0){
@@ -93,7 +85,6 @@ void read_from(struct of_switch *hi_switch){
 	}
 	hi_switch->bytes_read     += bytes_received;
 	hi_switch->bytes_expected -= bytes_received;
-	//fprintf(stderr, "Total bytes read from socket fd %d so far: %d\n", hi_switch->socket_fd, hi_switch->bytes_read);
 }
 
 
@@ -579,10 +570,12 @@ void write_flow_mod(struct of_switch *mod_sw, int reason, struct node *connectio
  */
 int is_switch_connection(uint8_t *data){
 	struct probe_packet *probe  = (struct probe_packet *)data;
-	if(probe->e.type < 100){
+	//fprintf(stderr, "Type of packet: %d\n", ntohs(probe->e.type));
+	
+	if(ntohs(probe->e.type) < 100){
 		uint16_t switch_fd = ntohs(probe->e.type);
-		fprintf(stderr, "Type of incoming packet: %d\n", switch_fd);		
-		fprintf(stderr, "switch to switch connection!\n");
+		//fprintf(stderr, "Type of incoming packet: %d\n", switch_fd);		
+		//fprintf(stderr, "switch to switch connection!\n");
 		return switch_fd;	
 	}
 	return 0;
@@ -605,13 +598,11 @@ uint32_t get_input_port(struct ofp_match *match){
 			break;
 		}
 		else{
-			fprintf(stderr, "Length is %d\n", OXM_LENGTH(match->oxm_fields[i]));
-			exit(1);
-			i += match->oxm_fields[i + 1]; //get the length and add that to i to get to next field
+			i += OXM_LENGTH(match->oxm_fields[i]); //get the length and add that to i to get to next field
 		}
 	}
 
-	fprintf(stderr, "Port is: %d\n", port);
+	//fprintf(stderr, "Port is: %d\n", port);
 	return port;
 }
 
@@ -643,8 +634,10 @@ void read_packet_in(struct of_switch *r_switch){
 		//fprintf(stderr, "Packet here because of table miss!\n");
 		//if we know what to do, write a flow mod, else flood the packet and save the src
 		struct node *connection = NULL;
-		if(is_switch_connection((uint8_t *)&r_switch->read_buffer[ntohs(pkt->header.length) - ntohs(pkt->total_len)])){
+		int nextdoor_fd = 0;
+		if((nextdoor_fd = is_switch_connection((uint8_t *)&r_switch->read_buffer[ntohs(pkt->header.length) - ntohs(pkt->total_len)]))){
 			//do nothing, drop the packet and add switch connection to network
+			add_connection(r_switch->socket_fd, nextdoor_fd, input_port, 0); 	
 		}
 		else{
 			/* add flow on both input and output tables */

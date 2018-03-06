@@ -32,6 +32,7 @@ struct node{
 	uint8_t is_switch;
 	uint8_t device_num; //used to index into the adj matrix
 	uint8_t port_num;
+	uint8_t discovered; //used for DFS
 };
 
 
@@ -66,4 +67,5 @@ struct of_switch{
 };
 
 
+void add_connection(uint8_t dest, uint8_t src, uint32_t dst_port, uint32_t src_port);
 #endif
