@@ -75,10 +75,10 @@ void free_switch_buffers(struct of_switch *switches){
 	for(; i < idk_man.num_connected_switches; i++){
 		if(switches->rw != DISCONNECTED){
 			if(switches->read_buffer != NULL){
-				//free(switches->read_buffer);
+				free(switches->read_buffer);
 			}
 			if(switches->write_buffer != NULL){
-				//free(switches->write_buffer);
+				free(switches->write_buffer);
 			}
 		}
 	}	
@@ -88,7 +88,7 @@ void free_switch_buffers(struct of_switch *switches){
 void free_controller_mem(){
 	free_switch_buffers(idk_man.switch_list);
 	if(idk_man.switch_list != NULL){
-		//free(idk_man.switch_list);
+		free(idk_man.switch_list);
 	}
 }
 
@@ -105,14 +105,12 @@ void free_network_graph(struct network *graph){
 			}
 		}
 	}
-	//free(graph->devices);
-	//free(graph);
+	free(graph->devices);
+	free(graph);
 }
 
 /* when SIGINT is received, this is called to clean up */
-void controller_exit(){
-	free_controller_mem();
-	free_network_graph(network_graph);
+void controller_exit(void){
 	interrupt = 1; 
 	fprintf(stderr, "\n=====================================\n"
 			"\n  OPENFLOW CONTROLLER SHUTTING DOWN  \n"
@@ -126,10 +124,7 @@ void resize_switch_list(){
 	idk_man.max_connected_switches *= 2;
 	idk_man.switch_list = realloc(idk_man.switch_list, sizeof(struct of_switch) * idk_man.max_connected_switches);
 	if(idk_man.switch_list == NULL){
-		fprintf(stderr, "Unable to hold info for %d switches... \n"
-				"\n=====================================\n"
-				"\n  OPENFLOW CONTROLLER SHUTTING DOWN  \n"
-				"\n=====================================\n", idk_man.max_connected_switches);
+		fprintf(stderr, "Unable to hold info for %d switches... \n", idk_man.max_connected_switches);
 		controller_exit();
 	}
 }
@@ -213,7 +208,9 @@ void setup_new_switch(int fd){
 void create_new_connection(){
 	int new_switch_fd;
 
-	new_switch_fd = accept(listening_socket_fd, NULL, NULL);
+	if((new_switch_fd = accept(listening_socket_fd, NULL, NULL)) == -1){
+		perror("Accept fail");
+	}
 	//fprintf(stderr, "FD of new switch %lu: %d\n", idk_man.num_connected_switches, new_switch_fd);
 	setup_new_switch(new_switch_fd);
 }
@@ -392,7 +389,7 @@ void handle_all_sockets(){
 		create_new_connection();
 	}
 	if(FD_ISSET(listening_socket_fd, &error_sockets)){
-		fprintf(stderr, "ERROR ON LISTENING SOCKET!\n");
+		//fprintf(stderr, "ERROR ON LISTENING SOCKET!\n");
 	}
 	
 	int i = 0;
@@ -424,7 +421,8 @@ void select_loop(){
 		//all select sets are modified in select
 		sel_ret = select(largest_fd + 1, &read_sockets, &write_sockets, &error_sockets, 0);
 		if(sel_ret == -1){
-			controller_exit();
+			//fprintf(stderr, "CALLING FROM sel_ret\n");
+			//controller_exit();
 		}
 		else if(sel_ret == 0){
 			//nothing has changed
@@ -466,6 +464,7 @@ int get_port(struct sockaddr *server){
 
 void sigint_handler(int sig){
 	if (SIGINT == sig){
+		//fprintf(stderr, "CALLING FROM sigint_handler\n");
 		controller_exit();
 	}
 }
@@ -535,6 +534,12 @@ int main(int argc, char **argv){
 	/* start looping through FDs, waiting for connections/sending packets */
 	select_loop();
 
+	/* free all used memory */	
+	free_network_graph(network_graph);
+	free_controller_mem();
+	freeaddrinfo(server);
+	close(listening_socket_fd);
+	
 	/* exit only when the SIGINT is received */
 	exit(0);
 }
