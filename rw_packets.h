@@ -69,4 +69,7 @@ void read_port_change(struct of_switch *uneasy_switch);
 
 void write_flow_mod(struct of_switch *mod_sw, int reason, struct node *connection, uint8_t ip_match, uint32_t out_port);
 void send_probe_packet(struct of_switch *new_s);
+
+
+void change_port_behavior(struct of_switch *changing_switch, uint32_t port, uint8_t enable);
 #endif

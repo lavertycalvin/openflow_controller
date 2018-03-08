@@ -73,21 +73,21 @@ void print_network(struct network *graph){
 int recursive_loop_exists(int find_node, int last_node){
 	int ret = 0;
 	int i = 0;
-	while((network_graph->devices[i] != NULL) && network_graph->devices[i]->device_num != find_node){
-		i++;
-	}
+	while((network_graph->devices[i] != NULL) && network_graph->devices[i]->device_num != find_node) i++;
+	//found node from last call, check if already discovered
+	//fprintf(stderr, "Recursive call: Last: %d Finding: %d\n", last_node, find_node);
 	if(network_graph->devices[i]->discovered == 0){
+		//fprintf(stderr, "Marking %d as discovered (recusive), parent: %d\n", network_graph->devices[i]->device_num, last_node);
 		network_graph->devices[i]->discovered = 1;
 		struct node *next_node = network_graph->devices[i]->next;
 		while((next_node != NULL) && (ret == 0)){
 			if(next_node->device_num != last_node){
 				int j = 0;
-				while((network_graph->devices[j] != NULL) && (network_graph->devices[j]->device_num != next_node->device_num)){
-					j++;
-				}
+				while((network_graph->devices[j] != NULL) && (network_graph->devices[j]->device_num != next_node->device_num)) j++;
 				if(network_graph->devices[j]->discovered){
 					//we found a connection that is already discovered and was not directly connected
-					fprintf(stderr, "FOUND A CYCLE (%d was already discovered)!\n", last_node);
+					//fprintf(stderr, "FOUND A CYCLE (%d was already discovered)!\n", network_graph->devices[j]->device_num);
+					//ret = network_graph->devices[i]->device_num;
 					ret = network_graph->devices[j]->device_num;
 					return ret;
 				}
@@ -96,29 +96,30 @@ int recursive_loop_exists(int find_node, int last_node){
 			next_node = next_node->next;
 		}
 	}
-
 	return ret;
 }
 
 
-/* performs BFS on the network graph in order
+/* performs DFS on the network graph in order
  * to find if there are loops
- * O(n^2) performance :(
  */
 int loop_exists(void){
 	int loop = 0;
 	int i = 0;
 	for(; i < network_graph->max_network_size; i++){
-		if(network_graph->devices[i] != NULL){
-			if(network_graph->devices[i]->discovered == 0){
-				network_graph->devices[i]->discovered = 1;
-				if(network_graph->devices[i]->next != NULL){
-					loop = recursive_loop_exists(network_graph->devices[i]->next->device_num, network_graph->devices[i]->device_num);
-				}			
+		if((network_graph->devices[i] != NULL) && (network_graph->devices[i]->discovered == 0)){
+			//fprintf(stderr, "Marking %d as discovered (outer)\n", network_graph->devices[i]->device_num);
+			network_graph->devices[i]->discovered = 1;
+			struct node *next_node = network_graph->devices[i]->next;
+			while(next_node != NULL){
+				loop = recursive_loop_exists(next_node->device_num, network_graph->devices[i]->device_num);
+				if(loop != 0){
+					break;
+				}
+				next_node = next_node->next;
 
-			}
+			}			
 		}
-				
 	}	
 
 
@@ -158,25 +159,29 @@ void add_connection(uint8_t dest, uint8_t src, uint32_t dst_port, uint32_t src_p
 				if(match == dest){
 					//save the src
 					new->device_num = src;
+					new->port_num   = src_port;
 				}
 				else{
 					//save the dest
 					new->device_num = dest;
-					new->port_num = dst_port;
+					new->port_num   = dst_port; //always 0
 				}
 				new->next = NULL; //set the next item to be null
-
-
 			}
 		}	
 		
 	}
+
 	//TO DO: After each connection, check to see if we have a loop
-	if(loop_exists()){
+	int looped_device = 0;
+	//print_network(network_graph);
+	if((looped_device = loop_exists())){
 		fprintf(stderr, "Theres a loop!\n");
-		exit(1);
+		print_network(network_graph);
+		int i = 0;
+		while(idk_man.switch_list[i].socket_fd != looped_device) i++;
+		change_port_behavior(&idk_man.switch_list[i], src_port, 0);
 	}
-	print_network(network_graph);
 }
 
 /* Free all buffers for connected and used switches */
@@ -313,8 +318,6 @@ void setup_new_switch(int fd){
 	network_graph->devices[i]->next = NULL;
 	network_graph->devices[i]->discovered = 0;
 	network_graph->num_conn_devices++;
-
-	print_network(network_graph);
 }
 
 /* Handles a new connection to a switch */
@@ -425,21 +428,16 @@ void handle_read_socket(struct of_switch *talking_switch){
 	switch(talking_switch->of_status){
 		case OFPT_ECHO_REQUEST : 
 			/* after getting a request, respond! */
-			//fprintf(stderr, "READ AN ECHO REQUEST!\n");
 			make_echo_reply(talking_switch);
 			break;	
 		
 		case OFPT_HELLO :
-			//fprintf(stderr, "We are reading an OFPT_HELLO!\n");
 			read_openflow_hello(talking_switch);	
-			/* after reading hello, send our features request */
-			//write_openflow_hello(talking_switch);
 			break;
 	
 		case OFPT_FEATURES_REPLY :
 			read_features(talking_switch);
 			send_probe_packet(talking_switch);
-			/* set config for the switch */
 			break;	
 		
 		case OFPT_PACKET_IN :
@@ -447,7 +445,6 @@ void handle_read_socket(struct of_switch *talking_switch){
 			break;
 			
 		case OFPT_MULTIPART_REPLY :
-		        //fprintf(stderr, "Multipart reply!\n");
 			handle_multipart_reply(talking_switch);
 	       		break;	       
 		
@@ -458,13 +455,13 @@ void handle_read_socket(struct of_switch *talking_switch){
 			break;
 		
 		case OFPT_FLOW_REMOVED :
-			fprintf(stderr, "Flow timed out!\n");
+			//fprintf(stderr, "Flow timed out!\n");
 			break;
 
 		default:
 			/* assume it is an error */
 			fprintf(stderr, "This is an OFPT_ERROR! Closing connection!\n");
-			close(talking_switch->socket_fd);
+			//close(talking_switch->socket_fd);
 			talking_switch->rw = DISCONNECTED;
 			break;
 	}
@@ -478,6 +475,7 @@ void handle_read_socket(struct of_switch *talking_switch){
 }
 
 void handle_write_socket(struct of_switch *listening_switch){
+	//fprintf(stderr, "Writing\n");
 	if(listening_switch->bytes_expected != 0){
 		write_to(listening_switch);
 		if(listening_switch->bytes_expected != 0){
