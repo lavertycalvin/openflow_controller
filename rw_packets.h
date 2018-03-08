@@ -65,7 +65,7 @@ void handle_multipart_reply(struct of_switch *loaded_switch);
 
 void get_port_info(struct of_switch *unk_switch);
 
-void read_port_change(struct of_switch *uneasy_switch);
+void read_port_change(struct of_switch *uneasy_switch, struct network *graph);
 
 void write_flow_mod(struct of_switch *mod_sw, int reason, struct node *connection, uint8_t ip_match, uint32_t out_port);
 void send_probe_packet(struct of_switch *new_s);

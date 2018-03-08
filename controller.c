@@ -188,13 +188,9 @@ void add_connection(uint8_t dest, uint8_t src, uint32_t dst_port, uint32_t src_p
 void free_switch_buffers(struct of_switch *switches){
 	int i = 0;
 	for(; i < idk_man.num_connected_switches; i++){
-		if(switches->rw != DISCONNECTED){
-			if(switches->read_buffer != NULL){
-				free(switches->read_buffer);
-			}
-			if(switches->write_buffer != NULL){
-				free(switches->write_buffer);
-			}
+		if(switches[i].rw != DISCONNECTED){
+				free(switches[i].read_buffer);
+				free(switches[i].write_buffer);
 		}
 	}	
 }
@@ -451,7 +447,7 @@ void handle_read_socket(struct of_switch *talking_switch){
 		case OFPT_PORT_STATUS :
 			/* an asynchronous event when link goes
 			 * up or down */
-			read_port_change(talking_switch);
+			read_port_change(talking_switch, network_graph);
 			break;
 		
 		case OFPT_FLOW_REMOVED :
@@ -463,6 +459,7 @@ void handle_read_socket(struct of_switch *talking_switch){
 			fprintf(stderr, "This is an OFPT_ERROR! Closing connection!\n");
 			//close(talking_switch->socket_fd);
 			talking_switch->rw = DISCONNECTED;
+			free_switch_buffers(talking_switch);
 			break;
 	}
 	//if we are not planning on writing anything, reset to read

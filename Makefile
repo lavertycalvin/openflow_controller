@@ -26,10 +26,10 @@ endif
 all:  controller-$(EXEC_SUFFIX)
 
 controller-$(EXEC_SUFFIX): controller.c rw_packets.c
-	$(CC) $(CFLAGS) $(OSINC) $(OSLIB) $(OSDEF) -o $@ controller.c checksum.c rw_packets.c smartalloc.c -lpcap
+	$(CC) $(CFLAGS) $(OSINC) $(OSLIB) $(OSDEF) -o $@ controller.c rw_packets.c smartalloc.c -lpcap
 
 handin: README
-	handin bellardo p2_m2 README smartalloc.c smartalloc.h  Makefile
+	handin bellardo p2_m3 README smartalloc.c smartalloc.h openflow.h controller.c controller.h rw_packets.c rw_packets.h Makefile
 
 clean:
 	-rm -rf controller-* controller-*.dSYM

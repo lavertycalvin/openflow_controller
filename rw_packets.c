@@ -5,7 +5,6 @@
 #include <netinet/in.h>
 #include <netinet/ether.h>
 #include "openflow.h"
-#include "flows.h"
 #include "string.h"
 #include <unistd.h>
 
@@ -190,22 +189,41 @@ void write_echo_request(struct of_switch *echo_switch);
 void read_echo_reply(struct of_switch *echo_switch);
 
 
-void read_port_change(struct of_switch *uneasy_switch){
+void read_port_change(struct of_switch *uneasy_switch, struct network *graph){
 	struct ofp_port_status *status = (struct ofp_port_status *)uneasy_switch->read_buffer;
 	struct ofp_port *port = (struct ofp_port *)&status->desc;
-	fprintf(stderr, "\nXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
-			"\nXXXXXX PORT CHANGE! OH NOOOOOO XXXXXXX"
+	fprintf(stderr, "\nXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+			"\nXXXXXXXXX PORT CHANGE! OH NOOOOOO XXXXXXXXXXX"
+			"\nXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 			"\n\tSwitch Number    : %d"
 			"\n\tPort that changed: %u"
 			"\n\tName  of port    : %s"
-			"\n\tState of port    : 0x%02x (1 is down, 0 is up)"
-			"\nXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n\n",
+			"\n\tState of port    : %u (0 up, 1 down)"
+			"\nXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n\n",
 			uneasy_switch->socket_fd, ntohl(port->port_no), port->name, ntohl(port->state));
 	
 	/******************************************
 	 * TO DO: change the network to mark the 
 	 * 	  port as unusable
 	 ******************************************/
+	int i = 0;
+	while(graph->devices[i]->device_num != uneasy_switch->socket_fd) i++;
+	struct node *next_node = graph->devices[i]->next;
+	while(next_node != NULL){
+		if(next_node->port_num == ntohl(port->port_no)){
+			if(ntohl(port->state == 0)){
+				fprintf(stderr, "Switch to switch connection established\n");
+			}
+			else{
+				fprintf(stderr, "Switch to switch connection has dropped!\n");
+				/***************************************************
+				 * When this happens, check to see if we previously 
+				 * 	had a loop. If we did, re-establish the link
+				 ***************************************************/
+			}
+		}
+		next_node = next_node->next;
+	}
 	
 }
 
@@ -611,7 +629,7 @@ void print_mac_address(uint8_t *mac){
  * */
 void change_port_behavior(struct of_switch *changing_switch, uint32_t port, uint8_t enable){
 	fprintf(stderr, "Changing switch %d, port %d!\n", changing_switch->socket_fd, port);
-	struct ofp_port_mod *port_mod = (struct ofp_port_mod *)&changing_switch->write_buffer[changing_switch->bytes_expected];
+	struct ofp_port_mod *port_mod = (struct ofp_port_mod *)changing_switch->write_buffer;
 	
 	port_mod->header.type    = OFPT_PORT_MOD;
 	port_mod->header.version = OFP_VERSION;
@@ -620,9 +638,7 @@ void change_port_behavior(struct of_switch *changing_switch, uint32_t port, uint
 
 	port_mod->port_no = htonl(port);
 
-	print_mac_address(&port_mod->hw_addr[0]);
 	memcpy(&port_mod->hw_addr[0], &changing_switch->connected_ports[port].hw_addr[0], OFP_ETH_ALEN);
-	print_mac_address(&port_mod->hw_addr[0]);
 	
 	if(enable){
 		port_mod->config  = htonl(0); //enable fwding and receiving
@@ -635,7 +651,7 @@ void change_port_behavior(struct of_switch *changing_switch, uint32_t port, uint
 	
 	changing_switch->rw = WRITE;
 	changing_switch->of_status = OFPT_PORT_MOD;
-	changing_switch->bytes_expected += ntohs(port_mod->header.length);
+	changing_switch->bytes_expected = ntohs(port_mod->header.length);
 }
 
 
@@ -706,15 +722,15 @@ void save_connected_ports(struct of_switch *s){
 	int num_ports = (ntohs(m->header.length) - sizeof(struct ofp_multipart_reply)) / sizeof(struct ofp_port); // get num of ports included
 	struct ofp_port *port = (struct ofp_port *)(m->body);
 	int i = 0;
-	fprintf(stderr, "Switch %d\n", s->socket_fd);
+	//fprintf(stderr, "Switch %d\n", s->socket_fd);
 	for(i = 0; i < num_ports; i++){
 		//get the port number and dont save local port
 		if(ntohl(port[i].port_no) == OFPP_LOCAL){
 			continue;
 		}
 		uint32_t j = ntohl(port[i].port_no);
-		fprintf(stderr, "\tport %d: ", j);
-		print_mac_address(&port[i].hw_addr[0]);
+		//fprintf(stderr, "\tport %d: ", j);
+		//print_mac_address(&port[i].hw_addr[0]);
 		//we have to check this in case the ports are given to us out of order (rare)
 		memcpy(&s->connected_ports[j], &port[i], sizeof(struct ofp_port));
 	}
